@@ -18,7 +18,7 @@
 | Supplier or borrower | A pool may attach a hook that enforces its own rules, such as an allowlist; the pool page shows which hook, if any (§3.5). Suppliers give up a small share of borrower interest to the protocol (§3.4). | Borrow rates, health factor, liquidations, auctions, the UI flow (§1.3). |
 | Backstop depositor | Each pool has its own backstop contract (§3.1). A standard backstop holds the v2.1 Comet LP token and earns BLND, claimed from the distributor; a custom backstop holds the token its pool chose and earns none (§3.2, §3.3). | The 17-day withdrawal queue and the lever over pool status (§3.1). |
 | BLND holder | Treasury surplus, after maintenance is funded, is proposed for buying BLND back and burning it. Pools with a custom backstop pay the same protocol fee into the same treasury, so every pool supports BLND whether or not it holds it (§3.4, §4). | The token, the emitter and the emission rate. No new token and no token swap; the emitter's one-time drop is an open question (§7). |
-| Pool admin | You pick a standard or a custom backstop at deploy and an optional hook; both are fixed for the pool's life (§3.2, §3.5). You size the backstop's activation deposit, `min_backstop`, in the backstop token, at deploy (§3.1). The protocol fee applies to every pool, including one with a zero backstop take rate (§3.4). Only verified standard deployments earn emissions (§3.3). | The admin levers from v2: reserve settings, status, backstop take rate. |
+| Pool admin | You pick a standard or a custom backstop at deploy and an optional hook; both are fixed for the pool's life (§3.2, §3.5). You size the backstop's activation deposit, `min_backstop`, in the backstop token, at deploy (§3.1). The protocol fee applies to every pool, including one with a zero backstop take rate (§3.4). Only verified standard deployments earn emissions (§3.3). You set a maximum price age for each reserve (§3.7). | The admin levers from v2: reserve settings, status, backstop take rate. |
 | Asset issuer (RWA, regulated stablecoins) | Allowlists, gated liquidators and rules on exits through hooks (§3.5). A targeted clawback through the pool removes one holder's position exactly (§3.6). | The issuer's powers over its own token are unchanged; the pool only learns to live with them. |
 | Integrator or builder (SDK, UI, bots, products on a pool) | A new backstop ABI and SDK version; backstop emissions are claimed from the distributor (§3.1, §3.3). New treasury and distributor calls; one new auction to fill (§3.4). A hook lets a product set the rules of its own pool while the core stays audited and unchanged (§3.5). | The pool ABI for supply, borrow, repay, withdraw, auctions and flash loans (§1.3). |
 
@@ -38,6 +38,7 @@
   - [3.4 Protocol fee and treasury](#34-protocol-fee-and-treasury)
   - [3.5 Pool hooks](#35-pool-hooks)
   - [3.6 Issuer controls](#36-issuer-controls)
+  - [3.7 Price age per reserve](#37-price-age-per-reserve)
 - [4. BLND](#4-blnd)
 - [5. Migration](#5-migration)
 - [6. Security](#6-security)
@@ -59,7 +60,7 @@ The YieldBlox oracle attack of February 2026 is not what v3 answers. Price quali
 
 ### 1.3 What v2 got right and stays
 
-The change is narrow because most of v2 is kept. The lending core stays: reserves with their interest-rate curves, the supply and debt accounting, the health factor, and the batch `submit` interface that bots and wallets already use. The auction design stays: user liquidations, bad-debt auctions and interest auctions all run as v2's Dutch auctions. Oracle handling stays: the pool reads prices through the same interface with the same limit on how old a price may be, and Script3's oracle aggregator can still sit in front of it. Reserve configuration stays: the same parameters, queued with the same waiting period before a change takes effect. The withdrawal queue stays: a backstop depositor who wants out queues for 17 days, and the share of a backstop that is queued still drives the pool's status. BLND stays: the token, its emitter and its emission rate. The tooling stays: the SDK, the UI, the keeper and liquidation bots and the deployment checks carry over with the backstop module adjusted. Audit reports from two firms cover this code (§6).
+The change is narrow because most of v2 is kept. The lending core stays: reserves with their interest-rate curves, the supply and debt accounting, the health factor, and the batch `submit` interface that bots and wallets already use. The auction design stays: user liquidations, bad-debt auctions and interest auctions all run as v2's Dutch auctions. Oracle handling stays: the pool reads prices through the same interface, and Script3's oracle aggregator can still sit in front of it. Reserve configuration stays: v2's parameters, queued with the same waiting period before a change takes effect. The withdrawal queue stays: a backstop depositor who wants out queues for 17 days, and the share of a backstop that is queued still drives the pool's status. BLND stays: the token, its emitter and its emission rate. The tooling stays: the SDK, the UI, the keeper and liquidation bots and the deployment checks carry over with the backstop module adjusted. Audit reports from two firms cover this code (§6).
 
 One accounting change is stated where it is introduced: the protocol's share of accrued interest (§3.4).
 
@@ -203,12 +204,22 @@ Specification: [spec/hooks.md](spec/hooks.md).
 
 **Issue.** Issuers of Stellar assets can revoke a holder's authorization or claw back a balance. But an issuer has no way to claw back one holder's position in a pool without breaking the pool's accounting.
 
-**Design.** A targeted `clawback(asset, from, amount)` through the pool: the reserve token's current administrator removes an exact amount of one holder's supplied position and the pool burns the same amount from its own custody, ordinary supply first and collateral second, as far as the holder's position stays healthy. Borrowed-out tokens cannot be recalled this way, and borrower debt is never erased. Only the token's current administrator, the admin of its Stellar Asset Contract (SAC), can call it, and only on an asset issued with that power; pool admins and hooks gain none of this. A freeze or clawback against the pool itself is not handled in code (§7): listing such an asset is the pool admin's decision and needs the issuer's agreement to use the pool's entry point. Specification: [spec/pool.md](spec/pool.md).
+**Design.** A targeted `clawback(asset, from, amount, repay)` through the pool: the reserve token's current administrator removes an exact amount of one holder's supplied position and the pool burns the same amount from its own custody, ordinary supply first and collateral second. In the same call the administrator can repay the holder's debt; the position must end healthy. Borrowed-out tokens cannot be recalled this way, and borrower debt is never erased. Only the token's current administrator, the admin of its Stellar Asset Contract (SAC), can call it, and only on an asset issued with that power; pool admins and hooks gain none of this. `reconcile_loss` writes off a shortfall in the pool's own balance, as a direct clawback leaves, and freezes the pool; a freeze of that balance is not handled in code (§7). Listing an asset whose issuer holds these powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point. Specification: [spec/pool.md](spec/pool.md).
 
 | If you are a… | What changes |
 |---|---|
-| Asset issuer | You can claw back one holder's position through the pool, as far as it stays healthy. |
+| Asset issuer | You can claw back one holder's position through the pool, repaying their debt in the same call. |
 | Pool admin | Listing a clawback-enabled asset needs the issuer's agreement to use the pool's entry point. |
+
+### 3.7 Price age per reserve
+
+**Issue.** v2 rejects any price older than 24 hours, so an asset priced only on business days, such as a fund's NAV, goes stale every weekend.
+
+**Design.** Each reserve has its own maximum price age, set by the pool admin with the reserve's other parameters. Specification: [spec/pool.md](spec/pool.md).
+
+| If you are a… | What changes |
+|---|---|
+| Pool admin | You set a maximum price age for each reserve. |
 
 ## 4. BLND
 
@@ -242,7 +253,7 @@ Blend v2 at the commit v3 forks from was audited by Code4rena and by Certora, wh
 
 **Hooks.** A hook is trusted code. The core guarantees only that a hook cannot change what the pool did with a batch; a hook can refuse any action, including an exit, and can do under the user's signature whatever its code says. It is fixed at deploy, its code is public, and the UI shows a pool's hook and warns when it is not a known one.
 
-**Clawback.** Only the token's administrator can call it, for an exact amount of one position that must stay healthy; it erases no debt and recalls no borrowed-out tokens. An issuer acting against the pool itself, by freeze or direct clawback, is not handled in code and is open question 3.
+**Clawback.** Only the token's administrator can call it, for an exact amount of one position that must end healthy, and it may repay that position's debt in the same call; it erases no debt and recalls no borrowed-out tokens. A direct clawback against the pool itself leaves a shortfall that `reconcile_loss` writes off, freezing the pool; who may call it, and a freeze of the pool's balance, are open question 3.
 
 Standard backstops still share one dependency, the v2.1 Comet LP token; a pool that declines it is untouched by it.
 
@@ -250,8 +261,7 @@ Standard backstops still share one dependency, the v2.1 Comet LP token; a pool t
 
 1. **Guarding the emitter after the handover.** The backstop swap compares balances of one token at one address; with LP spread across many backstops, what the distributor names as its token decides who can take the emitter later and how a successor is installed.
 2. **The emitter drop.** The distributor triggers the emitter's one-time drop of up to 50M BLND; who receives it, and how much, is open.
-3. **Issuer action against the pool itself.** A direct clawback or a freeze of the pool's balance is not handled in code; whether to add reconciliation or quarantine.
-4. **Clawback of collateral a loan needs.** A clawback cannot leave the holder below the minimum health factor; how an issuer recovers collateral that backs a loan.
+3. **Issuer action against the pool itself.** Who may call `reconcile_loss`: anyone, since it freezes the pool, or only the pool admin or a guardian it names. A freeze of the pool's balance is not handled in code; whether to add quarantine.
 
 ## 8. Out of scope
 
@@ -283,7 +293,7 @@ Standard backstops still share one dependency, the v2.1 Comet LP token; a pool t
 - **Interest auction.** The auction that converts a backstop's accrued share of interest into backstop tokens: the filler bids backstop tokens and receives the interest.
 - **`min_backstop`.** The backstop deposit, in the backstop token, a pool needs before it activates; set when the pool is deployed.
 - **Pool admin.** The account that holds a pool's admin role, usually its creator.
-- **Pool status.** Active, on ice (no new borrowing) or frozen (no new positions), set by the admin or by the backstop's queue.
+- **Pool status.** Active, on ice (no new borrowing) or frozen (no new positions), set by the admin, by the backstop's queue or by `reconcile_loss`.
 - **Protocol fee / protocol rate.** The share of borrower interest that goes to the treasury; set by the treasury owner under an immutable cap.
 - **`protocol_credit`.** The protocol's accrued share of interest, recorded per reserve in the borrowed asset until a protocol interest auction sells it.
 - **Protocol interest auction.** The auction that sells a pool's accrued protocol credit for the treasury's payout token; the twin of the backstop interest auction.
