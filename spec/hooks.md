@@ -21,7 +21,7 @@ A hook may expose any other functions it needs, such as list management under it
 
 `Request`, `Reserve` and `Positions` are the pool's own types, already exposed by `submit`, `get_reserve` and `get_positions`. A hook needs no new type.
 
-**When it is called.** Once per call to `submit`, `submit_with_allowance` or `flash_loan`, whatever the batch contains: a batch that only withdraws or repays, and an empty batch, call it too. The call comes last, after every request has been applied, after the batch's checks have passed, the health check included, and after the tokens have moved; for a flash loan, after the receiver contract has run as well. No other pool function calls the hook: admin functions, `gulp`, `update_status`, `bad_debt`, `new_auction`, `clawback` and `reconcile_loss` run without it. The backstop never calls a hook.
+**When it is called.** Once per call to `submit`, `submit_with_allowance` or `flash_loan`, whatever the batch contains: a batch that only withdraws or repays, and an empty batch, call it too. The call comes last, after every request has been applied, after the batch's checks have passed, the health check included, and after the tokens have moved; for a flash loan, after the receiver contract has run as well. No other pool function calls the hook: admin functions, `gulp`, `update_status`, `bad_debt`, `new_auction`, `clawback` and `reconcile` run without it. The backstop never calls a hook.
 
 **What a panic does.** A panic in the hook, for any reason, reverts the transaction. Every storage write and every token transfer the batch made is undone, and the hook's own error reaches the caller of `submit`. A hook that exceeds the transaction's resource limits fails the batch the same way.
 

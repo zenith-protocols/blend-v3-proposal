@@ -86,6 +86,7 @@ flowchart LR
   P <-->|"interest auction bids / draw"| B
   P -.->|"get_rate"| T["Treasury"]
   I["Reserve token's issuer (SAC admin)"] -->|"clawback"| P
+  K["Keeper or guardian"] -.->|"reconcile"| P
   P -->|"Protocol interest auction bids"| T
   T -->|"Buyback and burn"| BLND["BLND"]
   T -->|"Maintenance and audits"| M["Maintenance"]
@@ -204,7 +205,7 @@ Specification: [spec/hooks.md](spec/hooks.md).
 
 **Issue.** Issuers of Stellar assets can revoke a holder's authorization or claw back a balance. But an issuer has no way to claw back one holder's position in a pool without breaking the pool's accounting.
 
-**Design.** A targeted `clawback(asset, from, amount, repay)` through the pool: the reserve token's current administrator removes an exact amount of one holder's supplied position and the pool burns the same amount from its own custody, ordinary supply first and collateral second. In the same call the administrator can repay the holder's debt; the position must end healthy. Borrowed-out tokens cannot be recalled this way, and borrower debt is never erased. Only the token's current administrator, the admin of its Stellar Asset Contract (SAC), can call it, and only on an asset issued with that power; pool admins and hooks gain none of this. `reconcile_loss` writes off a shortfall in the pool's own balance, as a direct clawback leaves, and freezes the pool; a freeze of that balance is not handled in code (§7). Listing an asset whose issuer holds these powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point. Specification: [spec/pool.md](spec/pool.md).
+**Design.** A targeted `clawback(asset, from, amount, repay)` through the pool: the reserve token's current administrator removes an exact amount of one holder's supplied position and the pool burns the same amount from its own custody, ordinary supply first and collateral second. In the same call the administrator can repay the holder's debt; the position must end healthy. Borrowed-out tokens cannot be recalled this way, and borrower debt is never erased. Only the token's current administrator, the admin of its Stellar Asset Contract (SAC), can call it, and only on an asset issued with that power; pool admins and hooks gain none of this. `reconcile` writes off a shortfall in the pool's own balance, as a direct clawback leaves, and freezes the pool; a freeze of that balance is not handled in code (§7). Listing an asset whose issuer holds these powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point. Specification: [spec/pool.md](spec/pool.md).
 
 | If you are a… | What changes |
 |---|---|
@@ -253,7 +254,7 @@ Blend v2 at the commit v3 forks from was audited by Code4rena and by Certora, wh
 
 **Hooks.** A hook is trusted code. The core guarantees only that a hook cannot change what the pool did with a batch; a hook can refuse any action, including an exit, and can do under the user's signature whatever its code says. It is fixed at deploy, its code is public, and the UI shows a pool's hook and warns when it is not a known one.
 
-**Clawback.** Only the token's administrator can call it, for an exact amount of one position that must end healthy, and it may repay that position's debt in the same call; it erases no debt and recalls no borrowed-out tokens. A direct clawback against the pool itself leaves a shortfall that `reconcile_loss` writes off, freezing the pool; who may call it, and a freeze of the pool's balance, are open question 3.
+**Clawback.** Only the token's administrator can call it, for an exact amount of one position that must end healthy, and it may repay that position's debt in the same call; it erases no debt and recalls no borrowed-out tokens. A direct clawback against the pool itself leaves a shortfall that `reconcile` writes off, freezing the pool; who may call it, and a freeze of the pool's balance, are open question 3.
 
 Standard backstops still share one dependency, the v2.1 Comet LP token; a pool that declines it is untouched by it.
 
@@ -261,7 +262,7 @@ Standard backstops still share one dependency, the v2.1 Comet LP token; a pool t
 
 1. **Guarding the emitter after the handover.** The backstop swap compares balances of one token at one address; with LP spread across many backstops, what the distributor names as its token decides who can take the emitter later and how a successor is installed.
 2. **The emitter drop.** The distributor triggers the emitter's one-time drop of up to 50M BLND; who receives it, and how much, is open.
-3. **Issuer action against the pool itself.** Who may call `reconcile_loss`: anyone, since it freezes the pool, or only the pool admin or a guardian it names. A freeze of the pool's balance is not handled in code; whether to add quarantine.
+3. **Issuer action against the pool itself.** Who may call `reconcile`: anyone, since it freezes the pool, or only the pool admin or a guardian it names. A freeze of the pool's balance is not handled in code; whether to add quarantine.
 
 ## 8. Out of scope
 
@@ -293,7 +294,7 @@ Standard backstops still share one dependency, the v2.1 Comet LP token; a pool t
 - **Interest auction.** The auction that converts a backstop's accrued share of interest into backstop tokens: the filler bids backstop tokens and receives the interest.
 - **`min_backstop`.** The backstop deposit, in the backstop token, a pool needs before it activates; set when the pool is deployed.
 - **Pool admin.** The account that holds a pool's admin role, usually its creator.
-- **Pool status.** Active, on ice (no new borrowing) or frozen (no new positions), set by the admin, by the backstop's queue or by `reconcile_loss`.
+- **Pool status.** Active, on ice (no new borrowing) or frozen (no new positions), set by the admin, by the backstop's queue or by `reconcile`.
 - **Protocol fee / protocol rate.** The share of borrower interest that goes to the treasury; set by the treasury owner under an immutable cap.
 - **`protocol_credit`.** The protocol's accrued share of interest, recorded per reserve in the borrowed asset until a protocol interest auction sells it.
 - **Protocol interest auction.** The auction that sells a pool's accrued protocol credit for the treasury's payout token; the twin of the backstop interest auction.
