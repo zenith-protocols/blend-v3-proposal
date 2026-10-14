@@ -27,7 +27,7 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 | `del_auction` | `auction_type: u32, user: Address` | none | none | As v2, and also deletes a protocol interest auction at any age once its bid token is no longer `treasury.get_token()`. |
 | `bad_debt` | `user: Address` | none | none | As v2; the backstop's debt is defaulted to suppliers only when the backstop's `total_assets` is zero, or less than the fraction of `min_backstop` fixed in pool code. |
 | `clawback` | `asset: Address, from: Address, amount: i128, repay: Map<Address, i128>` | none | the current administrator of the asset's Stellar Asset Contract | Repays the listed debts of `from` from the administrator, removes `amount` of `from`'s supplied position and burns `amount` from the pool's custody through the SAC. |
-| `reconcile` | `asset: Address` | `i128` | none; see Open points | When the pool holds less of `asset` than it owes, writes the shortfall off against `protocol_credit`, then suppliers through `b_rate`, then `backstop_credit`, and sets the pool's status to admin frozen. Deletes an open interest auction whose lot it cut. Returns the shortfall; without one it returns zero and changes nothing. |
+| `reconcile` | `asset: Address` | `i128` | none; see Open points | When the pool holds less of `asset` than it owes, writes the shortfall off against `protocol_credit`, then suppliers through `b_rate`, then `backstop_credit`, and, when the shortfall is at least `freeze_threshold` of the reserve's total supply, sets the pool's status to admin frozen. Deletes an open interest auction whose lot it cut. Returns the shortfall; without one it returns zero and changes nothing. |
 | `get_backstop` | none | `Address` | none | The backstop. |
 | `get_treasury` | none | `Address` | none | The treasury. |
 | `get_distributor` | none | `Address` | none | The distributor. |
@@ -64,7 +64,7 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 | Type | Fields | Content |
 |---|---|---|
 | `PoolConfig` | v2's fields plus `min_backstop: i128` | v2's pool config; `min_backstop` is the activation threshold, in backstop tokens |
-| `ReserveConfig` | v2's fields plus `max_price_age: u64` and `gulp_to_suppliers: bool` | v2's reserve config; `max_price_age` is how old a price for the reserve may be, in seconds; `gulp_to_suppliers` sends `gulp`'s surplus to suppliers instead of `backstop_credit` |
+| `ReserveConfig` | v2's fields plus `max_price_age: u64`, `gulp_to_suppliers: bool` and `freeze_threshold: u32` | v2's reserve config; `max_price_age` is how old a price for the reserve may be, in seconds; `gulp_to_suppliers` sends `gulp`'s surplus to suppliers instead of `backstop_credit`; `freeze_threshold` is the shortfall, as a share of the reserve's total supply in 7 decimals, from which `reconcile` freezes the pool; 0 never freezes |
 | `ReserveData` | v2's fields plus `protocol_credit: i128` | v2's reserve data; `protocol_credit`, next to `backstop_credit`, is the protocol's share of accrued interest, in the reserve's token |
 | `RequestType` | v2's variants plus `FillProtocolInterestAuction = 10` | the request types `submit` accepts |
 | `AuctionType` | v2's variants plus `ProtocolInterestAuction = 3` | the auction types |
@@ -89,7 +89,7 @@ No protocol rate is stored.
 | `clawback` | `["clawback", asset, from]` | `[amount, supply_b_tokens, collateral_b_tokens]` |
 | `reconcile` | `["reconcile", asset]` | `[shortfall, protocol_credit_loss, supplier_loss, backstop_credit_loss]` |
 
-`new_auction`, `fill_auction` and `delete_auction` carry auction type 3 for a protocol interest auction. `supply_b_tokens` and `collateral_b_tokens` are the b_tokens burned from ordinary supply and from collateral. The SAC emits its own `clawback` event with the pool as `from`. Each repayment in a `clawback` emits v2's `repay` event. An auction `reconcile` deletes emits `delete_auction`. A hook call emits nothing from the pool.
+`new_auction`, `fill_auction` and `delete_auction` carry auction type 3 for a protocol interest auction. `supply_b_tokens` and `collateral_b_tokens` are the b_tokens burned from ordinary supply and from collateral. The SAC emits its own `clawback` event with the pool as `from`. Each repayment in a `clawback` emits v2's `repay` event. An auction `reconcile` deletes emits `delete_auction`. A freeze by `reconcile` emits v2's `set_status` event. A hook call emits nothing from the pool.
 
 ## Errors
 
@@ -135,9 +135,9 @@ Cited files are in `blend-contracts-v2`.
 - Emissions: `pool/src/emissions/manager.rs` called `backstop.gulp_emissions(pool)` for the allocation and `distributor.rs` drew the BLND from the backstop's allowance; v3 calls `distributor.gulp_pool_emissions(pool)` and draws from the distributor's. Backstop depositors claim from the distributor (spec/distributor.md).
 - Hook: new, at the end of `execute_submit` and `execute_submit_with_flash_loan` (`pool/src/pool/submit.rs`). `pool/src/dependencies/` gains treasury, distributor and hook clients.
 - Clawback: v2 has no issuer entry point. A clawback executed directly against the pool's balance leaves custody short of the pool's records with no accounting response: `gulp` in `pool/src/pool/gulp.rs` credits a surplus to `backstop_credit` and returns zero on a deficit. A deauthorization of the pool's balance stops the pool's transfers of that asset, with no accounting response. v3 writes the first off with `reconcile` and leaves the second; the targeted clawback is added beside them. Against a v2 withdraw (`apply_withdraw` in `pool/src/pool/actions.rs`), the clawback keeps the conversion (`to_b_token_up` in `pool/src/pool/reserve.rs`), the emission settlement (`remove_supply` and `remove_collateral` in `pool/src/pool/user.rs`), the utilization rule (`require_utilization_below_100` in `pool/src/pool/reserve.rs`) and the health check (`validate_submit` in `pool/src/pool/submit.rs`). It differs in five ways: the SAC administrator authorizes it instead of the holder; it does not clamp to the position; the SAC burns the tokens instead of the pool transferring them; one call spans ordinary supply and collateral, in that order; and it is not a `submit`, so no hook runs. An open user liquidation auction on `from` blocks it as it blocks a `submit` (`validate_submit` in `pool/src/pool/submit.rs`). Repayments follow `apply_repay` in `pool/src/pool/actions.rs`, with the administrator as spender.
-- Shortfall: `reconcile` is new and sets status 4, admin frozen, which `update_status` (`pool/src/pool/status.rs`) cannot lift.
+- Shortfall: `reconcile` is new; a shortfall of at least the reserve's `freeze_threshold` sets status 4, admin frozen, which `update_status` (`pool/src/pool/status.rs`) cannot lift.
 
 ## Open points
 
-- Issuer action against the pool itself (README open question 3): who may call `reconcile`: anyone, since it freezes the pool, or only the pool admin or a guardian it names. A freeze of the pool's own balance is not handled in code; whether to add quarantine. Listing an asset whose administrator holds those powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point (README §3.6).
+- Issuer action against the pool itself (README open question 3): who may call `reconcile`: anyone, or only the pool admin or a guardian it names. A freeze of the pool's own balance is not handled in code; whether to add quarantine. Listing an asset whose administrator holds those powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point (README §3.6).
 - Yield paid in kind (README open question 4): the surplus raises `b_rate` in one step; whether to spread it over time.
