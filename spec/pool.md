@@ -14,13 +14,13 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 | `update_pool` | `backstop_take_rate: u32, max_positions: u32, min_collateral: i128` | none | admin | As v2; rejects a backstop take rate above `MAX_BACKSTOP_RATE`. |
 | `queue_set_reserve` | `asset: Address, metadata: ReserveConfig` | none | admin | As v2; rejects a `max_price_age` of zero. |
 | `get_config` | none | `PoolConfig` | none | As v2, with `min_backstop`. |
-| `get_reserve` | `asset: Address` | `Reserve` | none | As v2, with `protocol_credit` and `max_price_age`. |
+| `get_reserve` | `asset: Address` | `Reserve` | none | As v2, with v3's `ReserveConfig` and `ReserveData` fields. |
 | `submit` | `from: Address, spender: Address, to: Address, requests: Vec<Request>` | `Positions` | `spender`, and `from` when different | As v2, plus request type 10, which fills a protocol interest auction; then one hook call. |
 | `submit_with_allowance` | `from: Address, spender: Address, to: Address, requests: Vec<Request>` | `Positions` | `spender`, and `from` when different | As `submit`. |
 | `flash_loan` | `from: Address, flash_loan: FlashLoan, requests: Vec<Request>` | `Positions` | `from` | As v2; then one hook call. |
 | `update_status` | none | `u32` | none | As v2, with the threshold met when the backstop's `total_assets` is at least `min_backstop`, and the queued fraction the backstop's own share balance over its `total_supply`. |
 | `set_status` | `pool_status: u32` | none | admin | As v2, with `update_status`'s threshold and queued fraction. |
-| `gulp` | `asset: Address` | `i128` | none | As v2; `protocol_credit` is not surplus. |
+| `gulp` | `asset: Address` | `i128` | none | As v2; `protocol_credit` is not surplus. On a reserve with `gulp_to_suppliers` set and any supply, the surplus raises `b_rate` instead of `backstop_credit`. |
 | `gulp_emissions` | none | `i128` | none | Calls `distributor.gulp_pool_emissions(pool)` and books the amount into the reserve emission indices; no BLND moves. |
 | `claim` | `from: Address, reserve_token_ids: Vec<u32>, to: Address` | `i128` | `from` | As v2; transfers BLND from the distributor by `transfer_from` against the pool's allowance. |
 | `new_auction` | `auction_type: u32, user: Address, bid: Vec<Address>, lot: Vec<Address>, percent: u32` | `AuctionData` | none | As v2, plus auction type 3, the protocol interest auction. |
@@ -64,7 +64,7 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 | Type | Fields | Content |
 |---|---|---|
 | `PoolConfig` | v2's fields plus `min_backstop: i128` | v2's pool config; `min_backstop` is the activation threshold, in backstop tokens |
-| `ReserveConfig` | v2's fields plus `max_price_age: u64` | v2's reserve config; `max_price_age` is how old a price for the reserve may be, in seconds |
+| `ReserveConfig` | v2's fields plus `max_price_age: u64` and `gulp_to_suppliers: bool` | v2's reserve config; `max_price_age` is how old a price for the reserve may be, in seconds; `gulp_to_suppliers` sends `gulp`'s surplus to suppliers instead of `backstop_credit` |
 | `ReserveData` | v2's fields plus `protocol_credit: i128` | v2's reserve data; `protocol_credit`, next to `backstop_credit`, is the protocol's share of accrued interest, in the reserve's token |
 | `RequestType` | v2's variants plus `FillProtocolInterestAuction = 10` | the request types `submit` accepts |
 | `AuctionType` | v2's variants plus `ProtocolInterestAuction = 3` | the auction types |
@@ -128,6 +128,7 @@ Cited files are in `blend-contracts-v2`.
 - Accrual: `Reserve::accrue` (`pool/src/pool/reserve.rs`) took one share, at `bstop_rate`; v3 takes a second, at the treasury's rate, into `protocol_credit`.
 - Rate caps: `require_valid_pool_config` (`pool/src/pool/config.rs`) accepted any `bstop_rate` below one; v3 caps it at `MAX_BACKSTOP_RATE` and the protocol rate at `MAX_PROTOCOL_RATE`, constants in `pool/src/constants.rs` set before deployment.
 - Price age: `load_price` (`pool/src/pool/pool.rs`) rejected a price older than 24 hours; v3 uses the reserve's `max_price_age`.
+- Gulp: `execute_gulp` (`pool/src/pool/gulp.rs`) credited every surplus to `backstop_credit`; v3 raises `b_rate` instead on a reserve with `gulp_to_suppliers` set.
 - Auctions: `AuctionType` (`pool/src/auctions/auction.rs`) had three types and `RequestType` (`pool/src/pool/actions.rs`) ten; v3 adds one of each, built on `pool/src/auctions/backstop_interest_auction.rs`.
 - Backstop calls: `backstop_interest_auction.rs` and `bad_debt_auction.rs` checked the bid or lot token against `backstop.backstop_token()` and sized with `backstop.pool_data().token_spot_price` at 7 decimals; v3 uses `query_asset()` and `asset_price()`, rescaled. The interest auction's fill called `backstop.donate` under the filler's allowance; v3 transfers the bid to the backstop. `status.rs` read `pool_data().q4w_pct`; v3 divides the backstop's share balance by `total_supply()`.
 - Threshold: `calc_pool_backstop_threshold` (`pool/src/pool/status.rs`) computed a product constant from the BLND and USDC behind the backstop's LP tokens; v3 compares `backstop.total_assets()` with `min_backstop`, and the default rule in `pool/src/pool/bad_debt.rs` follows.
@@ -139,3 +140,4 @@ Cited files are in `blend-contracts-v2`.
 ## Open points
 
 - Issuer action against the pool itself (README open question 3): who may call `reconcile`: anyone, since it freezes the pool, or only the pool admin or a guardian it names. A freeze of the pool's own balance is not handled in code; whether to add quarantine. Listing an asset whose administrator holds those powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point (README §3.6).
+- Yield paid in kind (README open question 4): the surplus raises `b_rate` in one step; whether to spread it over time.

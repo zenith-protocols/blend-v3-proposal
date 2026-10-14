@@ -18,7 +18,7 @@
 | Supplier or borrower | A pool may attach a hook that enforces its own rules, such as an allowlist; the pool page shows which hook, if any (§3.5). Suppliers give up a small share of borrower interest to the protocol (§3.4). | Borrow rates, health factor, liquidations, auctions, the UI flow (§1.3). |
 | Backstop depositor | Each pool has its own backstop contract (§3.1). A standard backstop holds the v2.1 Comet LP token and earns BLND, claimed from the distributor; a custom backstop holds the token its pool chose and earns none (§3.2, §3.3). | The 17-day withdrawal queue and the lever over pool status (§3.1). |
 | BLND holder | Treasury surplus, after maintenance is funded, is proposed for buying BLND back and burning it. Pools with a custom backstop pay the same protocol fee into the same treasury, so every pool supports BLND whether or not it holds it (§3.4, §4). | The token, the emitter and the emission rate. No new token and no token swap; the emitter's one-time drop is an open question (§7). |
-| Pool admin | You pick a standard or a custom backstop at deploy and an optional hook; both are fixed for the pool's life (§3.2, §3.5). You size the backstop's activation deposit, `min_backstop`, in the backstop token, at deploy (§3.1). The protocol fee applies to every pool, including one with a zero backstop take rate (§3.4). Only verified standard deployments earn emissions (§3.3). You set a maximum price age for each reserve (§3.7). | The admin levers from v2: reserve settings, status, backstop take rate. |
+| Pool admin | You pick a standard or a custom backstop at deploy and an optional hook; both are fixed for the pool's life (§3.2, §3.5). You size the backstop's activation deposit, `min_backstop`, in the backstop token, at deploy (§3.1). The protocol fee applies to every pool, including one with a zero backstop take rate (§3.4). Only verified standard deployments earn emissions (§3.3). For each reserve you set a maximum price age (§3.7) and whether `gulp` credits its surplus to suppliers (§3.8). | The admin levers from v2: reserve settings, status, backstop take rate. |
 | Asset issuer (RWA, regulated stablecoins) | Allowlists, gated liquidators and rules on exits through hooks (§3.5). A targeted clawback through the pool removes one holder's position exactly (§3.6). | The issuer's powers over its own token are unchanged; the pool only learns to live with them. |
 | Integrator or builder (SDK, UI, bots, products on a pool) | A new backstop ABI and SDK version; backstop emissions are claimed from the distributor (§3.1, §3.3). New treasury and distributor calls; one new auction to fill (§3.4). A hook lets a product set the rules of its own pool while the core stays audited and unchanged (§3.5). | The pool ABI for supply, borrow, repay, withdraw, auctions and flash loans (§1.3). |
 
@@ -39,6 +39,7 @@
   - [3.5 Pool hooks](#35-pool-hooks)
   - [3.6 Issuer controls](#36-issuer-controls)
   - [3.7 Price age per reserve](#37-price-age-per-reserve)
+  - [3.8 Yield paid in kind](#38-yield-paid-in-kind)
 - [4. BLND](#4-blnd)
 - [5. Migration](#5-migration)
 - [6. Security](#6-security)
@@ -62,7 +63,7 @@ The YieldBlox oracle attack of February 2026 is not what v3 answers. Price quali
 
 The change is narrow because most of v2 is kept. The lending core stays: reserves with their interest-rate curves, the supply and debt accounting, the health factor, and the batch `submit` interface that bots and wallets already use. The auction design stays: user liquidations, bad-debt auctions and interest auctions all run as v2's Dutch auctions. Oracle handling stays: the pool reads prices through the same interface, and Script3's oracle aggregator can still sit in front of it. Reserve configuration stays: v2's parameters, queued with the same waiting period before a change takes effect. The withdrawal queue stays: a backstop depositor who wants out queues for 17 days, and the share of a backstop that is queued still drives the pool's status. BLND stays: the token, its emitter and its emission rate. The tooling stays: the SDK, the UI, the keeper and liquidation bots and the deployment checks carry over with the backstop module adjusted. Audit reports from two firms cover this code (§6).
 
-One accounting change is stated where it is introduced: the protocol's share of accrued interest (§3.4).
+Accounting changes are stated where they are introduced: the protocol's share of accrued interest (§3.4), the write-off of a shortfall (§3.6) and yield paid in kind (§3.8).
 
 ### 1.4 Design principles
 
@@ -222,6 +223,16 @@ Specification: [spec/hooks.md](spec/hooks.md).
 |---|---|
 | Pool admin | You set a maximum price age for each reserve. |
 
+### 3.8 Yield paid in kind
+
+**Issue.** v2's `gulp` credits any surplus in the pool's balance to the backstop, so when an asset pays its yield in new tokens, as some tokenized funds do, that yield reaches the backstop instead of the reserve's suppliers.
+
+**Design.** Each reserve has a flag, set by the pool admin with the reserve's other parameters, that makes `gulp` credit the surplus to the reserve's suppliers instead. Specification: [spec/pool.md](spec/pool.md).
+
+| If you are a… | What changes |
+|---|---|
+| Pool admin | You choose for each reserve whether `gulp` credits its surplus to suppliers. |
+
 ## 4. BLND
 
 BLND is kept. The token does not change, the emitter does not change and the emission rate of 1 BLND per second does not change. Emissions continue to backstops and their pools, now through the distributor, and only to standard backstops that hold the LP token of the Blend v2.1 BLND–USDC Comet pool (§3.3). Treasury surplus, after maintenance and an operating reserve, is proposed for buying BLND back and burning it (§3.4). The fee comes from every pool, custom-backstop pools included, so pools that hold no BLND still feed the buyback.
@@ -263,6 +274,7 @@ Standard backstops still share one dependency, the v2.1 Comet LP token; a pool t
 1. **Guarding the emitter after the handover.** The backstop swap compares balances of one token at one address; with LP spread across many backstops, what the distributor names as its token decides who can take the emitter later and how a successor is installed.
 2. **The emitter drop.** The distributor triggers the emitter's one-time drop of up to 50M BLND; who receives it, and how much, is open.
 3. **Issuer action against the pool itself.** Who may call `reconcile`: anyone, since it freezes the pool, or only the pool admin or a guardian it names. A freeze of the pool's balance is not handled in code; whether to add quarantine.
+4. **Releasing yield paid in kind.** `gulp` credits the surplus to suppliers at once, so a supply made just before a gulp shares in yield paid before it; whether to spread it over time, as the distributor spreads emissions over 7 days.
 
 ## 8. Out of scope
 
