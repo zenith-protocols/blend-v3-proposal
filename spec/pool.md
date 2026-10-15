@@ -27,7 +27,7 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 | `del_auction` | `auction_type: u32, user: Address` | none | none | As v2, and also deletes a protocol interest auction at any age once its bid token is no longer `treasury.get_token()`. |
 | `bad_debt` | `user: Address` | none | none | As v2; the backstop's debt is defaulted to suppliers only when the backstop's `total_assets` is zero, or less than the fraction of `min_backstop` fixed in pool code. |
 | `clawback` | `asset: Address, from: Address, amount: i128, repay: Map<Address, i128>` | none | the current administrator of the asset's Stellar Asset Contract | Repays the listed debts of `from` from the administrator, removes `amount` of `from`'s supplied position and burns `amount` from the pool's custody through the SAC. |
-| `reconcile` | `asset: Address` | `i128` | none; see Open points | When the pool holds less of `asset` than it owes, writes the shortfall off against `protocol_credit`, then suppliers through `b_rate`, then `backstop_credit`, and, when the shortfall is at least `freeze_threshold` of the reserve's total supply, sets the pool's status to admin frozen. Deletes an open interest auction whose lot it cut. Returns the shortfall; without one it returns zero and changes nothing. |
+| `reconcile` | `asset: Address` | `i128` | none | When the pool holds less of `asset` than it owes, writes the shortfall off against `protocol_credit`, then suppliers through `b_rate`, then `backstop_credit`, and, when the shortfall is at least `freeze_threshold` of the reserve's total supply, sets the pool's status to admin frozen. Deletes an open interest auction whose lot it cut. Returns the shortfall; without one it returns zero and changes nothing. |
 | `get_backstop` | none | `Address` | none | The backstop. |
 | `get_treasury` | none | `Address` | none | The treasury. |
 | `get_distributor` | none | `Address` | none | The distributor. |
@@ -139,5 +139,5 @@ Cited files are in `blend-contracts-v2`.
 
 ## Open points
 
-- Issuer action against the pool itself (README open question 3): who may call `reconcile`: anyone, or only the pool admin or a guardian it names. A freeze of the pool's own balance is not handled in code; whether to add quarantine. Listing an asset whose administrator holds those powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point (README §3.6).
+- Issuer action against the pool itself (README open question 3): a freeze of the pool's own balance is not handled in code; whether to add quarantine. Listing an asset whose administrator holds those powers is the pool admin's decision and needs the issuer's agreement to use the pool's entry point (README §3.6).
 - Yield paid in kind (README open question 4): the surplus raises `b_rate` in one step; whether to spread it over time.
