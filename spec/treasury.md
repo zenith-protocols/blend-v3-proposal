@@ -11,7 +11,7 @@ The treasury holds the protocol rate, names the payout token that protocol inter
 | `__constructor` | `owner: Address, rate: u32, payout_token: Address, price_source: Address` | none | deployer | Sets the owner, the rate, the payout token and its price source. Fails with `InvalidRate` if `rate` exceeds `MAX_PROTOCOL_RATE`. |
 | `get_rate` | none | `u32` | nobody | The rate. |
 | `get_token` | none | `Address` | nobody | The payout token. |
-| `get_price` | none | `AssetPrice` | nobody | The payout token's price from the price source, in the source's decimals. Fails with `InvalidPrice` when the source has no price for the token, the price is not positive, or it is older than the age limit the pool applies to its own oracle prices. |
+| `get_price` | none | `AssetPrice` | nobody | The payout token's price from the price source, in the source's decimals. Fails with `InvalidPrice` when the source has no price for the token, the price is not positive, or it is older than 24 hours. |
 | `set_rate` | `rate: u32` | none | owner | Sets the rate. Fails with `InvalidRate` above `MAX_PROTOCOL_RATE`. |
 | `set_payout_token` | `token: Address, price_source: Address` | none | owner | Sets the payout token and the source that prices it, together. Fails with `InvalidPrice` if the source reports no valid price for the token. Open auctions keep their bid token. |
 | `withdraw` | `token: Address, to: Address, amount: i128` | none | owner | Transfers `amount` of `token` from the treasury to `to`. Any token. |
