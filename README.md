@@ -11,6 +11,8 @@
 
 > **Summary.** Blend v3 keeps Blend v2's lending core and BLND, and changes what sits around them. Every pool gets its own backstop and chooses what it holds. A standard backstop keeps v2's model, holding the LP token of the Blend v2.1 BLND–USDC Comet pool and earning BLND emissions through a new distributor. A custom backstop holds a token of the pool's own choice and earns none. The shared backstop asset becomes a choice per pool instead of a rule for all. The protocol takes a capped share of borrower interest into a treasury that pays for maintenance and audits, with surplus proposed for buying back and burning BLND. Any pool can attach a hook, a contract fixed at deploy that enforces the pool's own rules on every action: an allowlist, a permissioned liquidator set, an operator fee, a lock-up, or whatever else the operator needs, without a change to the core. An asset's issuer can claw back one holder's position through the pool, repaying that holder's debt in the same call, without breaking its accounting. Each reserve gets its own maximum price age and can pass yield paid in kind to its suppliers instead of backstop depositors. If a pool holds less of an asset than it owes, anyone can write the shortfall off. A shortfall that reaches a threshold set per reserve also freezes the pool until its admin lifts the freeze.
 
+[OVERVIEW.md](OVERVIEW.md) describes the whole protocol for a reader new to Blend.
+
 ## What changes for you
 
 | If you are a… | What changes | What stays |
@@ -70,7 +72,8 @@ Accounting changes are stated where they are introduced: the protocol's share of
 
 1. **Isolated first-loss capital.** One backstop per pool, holding one token, bound to that pool for life. One failure affects one pool.
 2. **Shared dependencies are opt-in.** The standard backstop keeps v2's model: it holds the LP token of the Blend v2.1 BLND–USDC Comet pool and earns emissions. A pool that wants none of that dependency deploys a custom backstop in a token of its choice and forgoes emissions. The protocol does not force one asset on everyone.
-3. **Immutable core, composable edges.** No upgrades in the pool, the backstop, the factory or the treasury. Extension happens through hooks and external contracts, set once at deploy.4. **The protocol pays for itself.** A share of borrower interest funds maintenance and audits. BLND keeps its token and its emissions, plus buybacks from treasury surplus.
+3. **Immutable core, composable edges.** No upgrades in the pool, the backstop, the factory or the treasury. Extension happens through hooks and external contracts, set once at deploy.
+4. **The protocol pays for itself.** A share of borrower interest funds maintenance and audits. BLND keeps its token and its emissions, plus buybacks from treasury surplus.
 
 ## 2. The design in one picture
 
