@@ -70,7 +70,8 @@ Accounting changes are stated where they are introduced: the protocol's share of
 
 1. **Isolated first-loss capital.** One backstop per pool, holding one token, bound to that pool for life. One failure affects one pool.
 2. **Shared dependencies are opt-in.** The standard backstop keeps v2's model: it holds the LP token of the Blend v2.1 BLND–USDC Comet pool and earns emissions. A pool that wants none of that dependency deploys a custom backstop in a token of its choice and forgoes emissions. The protocol does not force one asset on everyone.
-3. **Immutable core, composable edges.** No upgrades in the pool, the backstop, the factory or the treasury. Extension happens through hooks and external contracts, set once at deploy.4. **The protocol pays for itself.** A share of borrower interest funds maintenance and audits. BLND keeps its token and its emissions, plus buybacks from treasury surplus.
+3. **Immutable core, composable edges.** No upgrades in the pool, the backstop, the factory or the treasury. Extension happens through hooks and external contracts, set once at deploy.
+4. **The protocol pays for itself.** A share of borrower interest funds maintenance and audits. BLND keeps its token and its emissions, plus buybacks from treasury surplus.
 
 ## 2. The design in one picture
 
