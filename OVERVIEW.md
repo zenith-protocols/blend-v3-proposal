@@ -57,9 +57,9 @@ flowchart LR
   U["Suppliers / borrowers / auction fillers"] <-->|"submit"| P
   P -.->|"after every batch"| H["Optional hook"]
   P -.->|"prices"| O["Oracle"]
-  P <-->|"interest auction bids / draw for bad debt"| B
+  U <-->|"interest auction bids / draw for bad debt"| B
   P -.->|"get_rate"| T["Treasury"]
-  P -->|"protocol interest auction bids"| T
+  U -->|"protocol interest auction bids"| T
   I["Asset issuer"] -->|"clawback"| P
 ```
 
