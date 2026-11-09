@@ -20,6 +20,7 @@ The treasury holds the protocol rate, names the payout token that protocol inter
 | `fill_auction` | `filler: Address` | none | `filler` | Fills the open buyback auction in full (below). Fails with `NoAuction` when none is open. |
 | `get_auction` | none | `BuybackAuction` | nobody | The open buyback auction. Fails with `NoAuction` when none is open. |
 | `set_payout_token` | `token: Address, oracle: Address` | none | owner | If `Buyback` is above zero, first starts a buyback auction of it at the current oracle with no minimum, and fails with `AuctionInProgress` if one is open. Then sets the payout token and its oracle, together. Fails with `InvalidPrice` if the oracle reports no valid price for the token. Open protocol interest auctions keep their bid token. |
+| `set_oracle` | `oracle: Address` | none | owner | Sets the oracle. Fails with `InvalidPrice` if the oracle reports no valid price for the payout token. |
 | `withdraw` | `token: Address, to: Address, amount: i128` | none | owner | Transfers `amount` of `token` from the treasury to `to`. Any token. Fails with `InsufficientFunds` above the treasury's balance of `token` less `Buyback` when `token` is the payout token, and less the open buyback auction's lot when `token` is its lot token. |
 | Ownership | `Ownable`: `get_owner`, `transfer_ownership`, `accept_ownership`, `renounce_ownership` | as OpenZeppelin | as OpenZeppelin | OpenZeppelin's implementation. `renounce_ownership` fails with `RateNotZero` while the rate is above zero and with `InvalidSplit` while the split is below 100%. |
 
@@ -37,7 +38,7 @@ The pool sells `protocol_credit` in a protocol interest auction, the twin of v2'
 
 ### Buyback auction
 
-`new_auction` sells all of `Buyback` for BLND. It requires the lot to be worth at least 200 in the oracle's base, the backstop interest auction's minimum. The bid is 1.2 times the lot's value in BLND. The lot is valued at the oracle's price and BLND at the v1.1 Comet pool's spot price, four times its USDC balance over its BLND balance, without fees. `Buyback` is zeroed and its amount becomes the lot. One auction runs at a time.
+`new_auction` sells all of `Buyback` for BLND. It requires the lot to be worth at least 200 in the oracle's base, the backstop interest auction's minimum. The bid is 1.2 times the lot's value in BLND. The lot is valued in USDC at the oracle's prices for the payout token and USDC, and BLND at the v1.1 Comet pool's spot price in USDC, four times its USDC balance over its BLND balance, without fees. `Buyback` is zeroed and its amount becomes the lot. One auction runs at a time.
 
 The auction starts the ledger after `new_auction`. Lot and bid follow v2's auction curve: the lot grows from 0% to 100% over 200 ledgers with the bid whole, then the bid falls linearly to zero 400 ledgers after the start. `fill_auction` burns the scaled bid from the filler under the filler's authorization, transfers the scaled lot to the filler and deletes the auction. There are no partial fills. A zero bid burns nothing. The undelivered lot returns to `Buyback` if its token is still the payout token. Otherwise it stays in the treasury and `withdraw` can take it.
 
@@ -53,7 +54,7 @@ The auction starts the ledger after `new_auction`. Lot and bid follow v2's aucti
 |---|---|---|
 | `Rate` | instance, `u32` | the protocol rate, 7 decimals, at most `MAX_PROTOCOL_RATE` |
 | `PayoutToken` | instance, `Address` | the token protocol interest auctions are paid in |
-| `Oracle` | instance, `Address` | the oracle the payout token's price is read from |
+| `Oracle` | instance, `Address` | the oracle the payout token's and USDC's prices are read from |
 | `Split` | instance, `u32` | the buyback split, 7 decimals, at most 100% |
 | `Blnd` | instance, `Address` | the BLND token |
 | `Usdc` | instance, `Address` | the USDC token |
@@ -70,6 +71,7 @@ Every entry point extends the instance TTL. `get_rate` and `get_token` read inst
 |---|---|---|
 | `set_rate` | `["set_rate"]` | the new rate |
 | `set_payout_token` | `["set_payout_token"]` | the token and its oracle |
+| `set_oracle` | `["set_oracle"]` | the new oracle |
 | `withdraw` | `["withdraw"]` | `token`, `to`, `amount` |
 | `set_split` | `["set_split"]` | the new split |
 | `donate` | `["donate", from]` | `amount`, the part added to `Buyback` |
@@ -82,7 +84,7 @@ Every entry point extends the instance TTL. `get_rate` and `get_token` read inst
 | Error | Code | When |
 |---|---|---|
 | `InvalidRate` | new | a rate above `MAX_PROTOCOL_RATE` in the constructor or `set_rate` |
-| `InvalidPrice` | new | the oracle has no price for the payout token, or the price is not positive or too old |
+| `InvalidPrice` | new | the oracle has no price for the payout token, or for USDC in a buyback auction, or the price is not positive or too old |
 | `RateNotZero` | new | `renounce_ownership` while the rate is above zero |
 | `InvalidSplit` | new | a split above 100% in the constructor or `set_split`, or `renounce_ownership` while the split is below 100% |
 | `InsufficientFunds` | new | a `withdraw` above what `withdraw` may take |

@@ -99,7 +99,7 @@ A pool lends a set of assets, its reserves. The pool admin sets each reserve's p
 | `max_price_age` | The oldest oracle price the reserve accepts, in seconds. |
 | `gulp_to_suppliers` | Whether a surplus of the asset (§9.3) goes to suppliers instead of backstop credit (§3.5). |
 | `freeze_threshold` | The shortfall, as a share of the reserve's supply, that freezes the pool (§9.2). Zero never freezes. |
-| `borrow_limit` | The most of the asset that can be borrowed at once. It refills over five hours. Only repayments in the same batch free capacity. Zero has no limit. |
+| `borrow_limit` | The most net borrowing the reserve allows at once. It refills over five hours. Only repayments in the same batch free capacity. Zero has no limit. |
 
 Supply and utilization caps limit what a pool can lose to an asset whose token or price fails. The borrow limit caps how fast it can lose it.
 

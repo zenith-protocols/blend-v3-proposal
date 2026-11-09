@@ -253,7 +253,7 @@ Specification: [spec/hooks.md](spec/hooks.md).
 
 **Issue.** v2 caps how much of a reserve can be borrowed, not how fast. Borrowing against a manipulated price or with stolen funds can drain a reserve in one transaction.
 
-**Design.** Each reserve can have a borrow limit, set by the pool admin with the reserve's other parameters: the most of the asset that can be borrowed at once. The limit refills over five hours. Only repayments in the same batch free capacity. Zero has no limit. Specification: [spec/pool.md](spec/pool.md).
+**Design.** Each reserve can have a borrow limit, set by the pool admin with the reserve's other parameters: the most net borrowing the reserve allows at once. The limit refills over five hours. Only repayments in the same batch free capacity. Zero has no limit. Specification: [spec/pool.md](spec/pool.md).
 
 | If you are a… | What changes |
 |---|---|
@@ -321,7 +321,7 @@ Standard backstops still share one dependency, the v1.1 Comet LP token. A pool t
 - **Backstop swap.** The emitter's 31-day process for changing its recipient. It requires the new recipient to hold more of the current backstop token than the old one.
 - **Backstop take rate (`bstop_rate`).** The share of borrower interest that goes to the backstop, set by the pool admin within a cap.
 - **Bad-debt auction.** The auction that sells backstop tokens for a pool's defaulted debt.
-- **Borrow limit.** The most of an asset a reserve lets out at once. It refills over five hours.
+- **Borrow limit.** The most net borrowing a reserve allows at once. It refills over five hours.
 - **Buyback auction.** The treasury's auction that sells its buyback pot for BLND, which is burned.
 - **Clawback.** An issuer's removal of tokens from a balance. In v3 it can target one position through the pool.
 - **Comet.** The automated market maker holding the BLND–USDC pool. The Comet v1 pool's LP token was every v2 backstop's asset and is broken. The Comet v1.1 pool provides the v3 standard backstop asset.
