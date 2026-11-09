@@ -8,7 +8,7 @@ The treasury holds the protocol rate and the USDC that protocol interest auction
 
 | Function | Arguments | Returns | Who must authorize | Effect |
 |---|---|---|---|---|
-| `__constructor` | `owner: Address, rate: u32, split: u32, blnd: Address, comet: Address` | none | deployer | Sets the owner, the rate, the buyback split, BLND and the v1.1 Comet pool. Reads USDC from the pool's `get_tokens` as the token that is not `blnd`. Fails with `InvalidRate` if `rate` exceeds `MAX_PROTOCOL_RATE`, with `InvalidSplit` if `split` exceeds 100% and with `InvalidComet` if `blnd` is not one of the pool's two tokens. |
+| `__constructor` | `owner: Address, rate: u32, split: u32, comet: Address` | none | deployer | Sets the owner, the rate, the buyback split and the v1.1 Comet pool. Reads BLND and USDC from the pool's `get_tokens`: BLND is the token with the larger `get_normalized_weight`. Fails with `InvalidRate` if `rate` exceeds `MAX_PROTOCOL_RATE` and with `InvalidSplit` if `split` exceeds 100%. |
 | `get_rate` | none | `u32` | nobody | The rate. |
 | `get_token` | none | `Address` | nobody | USDC. |
 | `set_rate` | `rate: u32` | none | owner | Sets the rate. Fails with `InvalidRate` above `MAX_PROTOCOL_RATE`. |
@@ -18,8 +18,8 @@ The treasury holds the protocol rate and the USDC that protocol interest auction
 | `new_auction` | none | `BuybackAuction` | nobody | Starts a buyback auction of all of `Buyback` (below). Fails with `AuctionInProgress` while one is open and with `LotTooSmall` below the minimum. |
 | `fill_auction` | `filler: Address` | none | `filler` | Fills the open buyback auction in full (below). Fails with `NoAuction` when none is open. |
 | `get_auction` | none | `BuybackAuction` | nobody | The open buyback auction. Fails with `NoAuction` when none is open. |
-| `withdraw` | `token: Address, to: Address, amount: i128` | none | owner | Transfers `amount` of `token` from the treasury to `to`. Any token. Fails with `InsufficientFunds` above the treasury's balance of `token`, less `Buyback` and the open buyback auction's lot when `token` is USDC. |
-| Ownership | `Ownable`: `get_owner`, `transfer_ownership`, `accept_ownership`, `renounce_ownership` | as OpenZeppelin | as OpenZeppelin | OpenZeppelin's implementation. `renounce_ownership` fails with `RateNotZero` while the rate is above zero and with `InvalidSplit` while the split is below 100%. |
+| `withdraw` | `token: Address, to: Address, amount: i128` | none | owner | Transfers `amount` of `token` from the treasury to `to`. Any token. Fails with `InsufficientFunds` above the treasury's balance of `token`. For USDC the balance counts less `Buyback` and the open auction's lot. |
+| Ownership | `Ownable`: `get_owner`, `transfer_ownership`, `accept_ownership`, `renounce_ownership` | as OpenZeppelin | as OpenZeppelin | OpenZeppelin's implementation. `renounce_ownership` fails with `RateNotZero` while the rate is above zero and with `SplitNotFull` while the split is below 100%. |
 
 Rates and the split are `u32` with 7 decimals, as the backstop take rate is. `MAX_PROTOCOL_RATE` is a constant, 5%.
 
@@ -33,7 +33,7 @@ The pool sells `protocol_credit` in a protocol interest auction, the twin of v2'
 
 ### Buyback auction
 
-`new_auction` sells all of `Buyback` for BLND. It requires the lot to be at least 200 USDC, the backstop interest auction's minimum. The bid is 1.2 times the lot divided by BLND's spot price in the v1.1 Comet pool, four times its USDC balance over its BLND balance, without fees. `Buyback` is zeroed and its amount becomes the lot. One auction runs at a time.
+`new_auction` sells all of `Buyback` for BLND. It requires the lot to be at least 200 USDC. The bid is 1.2 times the lot divided by BLND's spot price in the v1.1 Comet pool, `get_spot_price_sans_fee(USDC, BLND)`, rounded down. `Buyback` is zeroed and its amount becomes the lot. One auction runs at a time.
 
 The auction starts the ledger after `new_auction`. Lot and bid follow v2's auction curve: the lot grows from 0% to 100% over 200 ledgers with the bid whole, then the bid falls linearly to zero 400 ledgers after the start. `fill_auction` burns the scaled bid from the filler under the filler's authorization, transfers the scaled lot to the filler and deletes the auction. There are no partial fills. A zero bid burns nothing. The undelivered lot returns to `Buyback`.
 
@@ -75,9 +75,9 @@ Every entry point extends the instance TTL. `get_rate` and `get_token` read inst
 | Error | Code | When |
 |---|---|---|
 | `InvalidRate` | new | a rate above `MAX_PROTOCOL_RATE` in the constructor or `set_rate` |
-| `InvalidComet` | new | `blnd` is not one of the Comet pool's two tokens in the constructor |
 | `RateNotZero` | new | `renounce_ownership` while the rate is above zero |
-| `InvalidSplit` | new | a split above 100% in the constructor or `set_split`, or `renounce_ownership` while the split is below 100% |
+| `InvalidSplit` | new | a split above 100% in the constructor or `set_split` |
+| `SplitNotFull` | new | `renounce_ownership` while the split is below 100% |
 | `InsufficientFunds` | new | a `withdraw` above what `withdraw` may take |
 | `AuctionInProgress` | new | `new_auction` while an auction is open |
 | `LotTooSmall` | new | `new_auction` with `Buyback` below the minimum |
@@ -92,7 +92,7 @@ Every entry point extends the instance TTL. `get_rate` and `get_token` read inst
 - The lot of a protocol interest auction is `protocol_credit` only. The treasury never receives supplier or backstop funds.
 - The pool calls the treasury only through `get_rate`, `get_token` and `donate`, and the treasury calls no pool. A failing `donate` stops protocol interest auctions and nothing else. The credit keeps accruing in the pool.
 - `Buyback` and an open auction's lot leave the treasury only through `fill_auction`. The owner cannot withdraw them.
-- A buyback auction's bid reaches zero 400 ledgers after it starts, so no auction blocks the next.
+- `new_auction` fails only while an auction is open. From 400 ledgers after the start anyone can fill it at a zero bid.
 - After `renounce_ownership` the rate is zero and stays zero, the split is 100% and never changes, and nothing leaves the treasury except buyback lots. Bids filled after that, for credit accrued before the rate reached zero, still arrive at the treasury.
 
 ## Differences from v2
