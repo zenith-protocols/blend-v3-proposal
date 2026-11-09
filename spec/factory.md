@@ -8,13 +8,13 @@ The factory deploys a lending pool bound to a backstop: on the standard route it
 
 | Function | Arguments | Returns | Who must authorize | Effect |
 |---|---|---|---|---|
-| `__constructor` | `pool_init_meta: PoolInitMeta` | none | the factory's deployer | Stores the two code hashes, the four addresses and the standard backstop's decimals offset; `backstop_token` is the v2.1 Comet LP token. No setter. |
+| `__constructor` | `pool_init_meta: PoolInitMeta` | none | the factory's deployer | Stores the two code hashes, the four addresses and the standard backstop's decimals offset. `backstop_token` is the v1.1 Comet LP token. No setter. |
 | `deploy` | `admin: Address, name: String, salt: BytesN<32>, oracle: Address, backstop_take_rate: u32, max_positions: u32, min_collateral: i128, min_backstop: i128, share_name: String, share_symbol: String, hook: Option<Address>` | `(Address, Address)`, the pool and the backstop | `admin` | Standard route, below. |
 | `deploy_custom` | `admin: Address, name: String, salt: BytesN<32>, oracle: Address, backstop_take_rate: u32, max_positions: u32, min_collateral: i128, min_backstop: i128, backstop: Address, hook: Option<Address>` | `(Address, Address)`, the pool and the backstop | `admin` | Custom route, below. |
 | `is_pool` | `pool: Address` | `bool` | none | True for a pool the factory deployed by either route. |
 | `get_backstop` | `pool: Address` | `Address` | none | The backstop of a `Standard` deployment; fails with `NotStandardDeployment` (1302) for any other address. |
 
-Both routes reject, with `InvalidPoolInitArgs` (1300), a backstop take rate above the cap the pool enforces, `max_positions` outside v2's bounds, a negative `min_collateral` and a negative `min_backstop`. `min_backstop` is an amount of the backstop's token, the v2.1 Comet LP token on the standard route; zero is allowed. The oracle, the hook and the share token metadata pass through unchecked.
+Both routes reject, with `InvalidPoolInitArgs` (1300), a backstop take rate above the cap the pool enforces, `max_positions` outside v2's bounds, a negative `min_collateral` and a negative `min_backstop`. `min_backstop` is an amount of the backstop's token, the v1.1 Comet LP token on the standard route. Zero is allowed. The oracle, the hook and the share token metadata pass through unchecked.
 
 ### Address derivation
 

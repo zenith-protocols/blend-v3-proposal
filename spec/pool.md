@@ -12,9 +12,10 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 |---|---|---|---|---|
 | `__constructor` | `admin: Address, name: String, oracle: Address, bstop_rate: u32, max_positions: u32, min_collateral: i128, min_backstop: i128, backstop_id: Address, treasury: Address, distributor: Address, blnd_id: Address, hook: Option<Address>` | none | admin; called by the factory | Stores the config and the bindings. Rejects a `bstop_rate` above `MAX_BACKSTOP_RATE` and a negative `min_backstop`. |
 | `update_pool` | `backstop_take_rate: u32, max_positions: u32, min_collateral: i128` | none | admin | As v2; rejects a backstop take rate above `MAX_BACKSTOP_RATE`. |
-| `queue_set_reserve` | `asset: Address, metadata: ReserveConfig` | none | admin | As v2; rejects a `max_price_age` of zero. |
+| `queue_set_reserve` | `asset: Address, metadata: ReserveConfig` | none | admin | As v2. Rejects a `max_price_age` of zero or a negative `borrow_limit`. |
 | `get_config` | none | `PoolConfig` | none | As v2, with `min_backstop`. |
 | `get_reserve` | `asset: Address` | `Reserve` | none | As v2, with v3's `ReserveConfig` and `ReserveData` fields. |
+| `get_borrow_capacity` | `asset: Address` | `i128` | none | What can still be borrowed of the reserve now, floored at zero. `i128::MAX` on a reserve without a limit. |
 | `submit` | `from: Address, spender: Address, to: Address, requests: Vec<Request>` | `Positions` | `spender`, and `from` when different | As v2, plus request type 10, which fills a protocol interest auction; then one hook call. |
 | `submit_with_allowance` | `from: Address, spender: Address, to: Address, requests: Vec<Request>` | `Positions` | `spender`, and `from` when different | As `submit`. |
 | `flash_loan` | `from: Address, flash_loan: FlashLoan, requests: Vec<Request>` | `Positions` | `from` | As v2; then one hook call. |
@@ -37,7 +38,11 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 
 **Backstop reads and calls.** The pool reads the backstop through the vault standard: `query_asset` for the bid token of a backstop interest auction and the lot token of a bad-debt auction; `total_assets` for the activation threshold, the bad-debt lot cap and the default rule; the backstop's own share balance over `total_supply` for the queued fraction that moves status. `asset_price` prices backstop tokens for both auctions: the pool rescales it from the decimals it reports to the oracle's before sizing the bid or the lot. The pool's oracle must quote in USD. A backstop interest auction fill transfers the scaled bid from the filler to the backstop under the filler's authorization, with no backstop call and no allowance; a bad-debt auction fill calls `draw`. The pool calls no other backstop function.
 
-**Protocol interest auction.** `new_auction(3, treasury, bid, lot, 100)` creates one. The lot is each listed reserve's `protocol_credit` after accrual, skipping reserves with none; it must be worth at least the minimum a backstop interest auction needs, at the pool oracle's prices. The bid is one token, `treasury.get_token()`, sized at 1.2 times the lot's value divided by `treasury.get_price()`, rescaled from the decimals it reports to the oracle's. One runs at a time; bid and lot scale along v2's auction curve. Request type 10 fills it: the pool transfers the scaled bid from the filler to the treasury under the filler's authorization, subtracts each delivered lot amount from its reserve's `protocol_credit`, and transfers the lot to the filler.
+**Protocol interest auction.** `new_auction(3, treasury, bid, lot, 100)` creates one. The lot is each listed reserve's `protocol_credit` after accrual, skipping reserves with none. It must be worth at least the minimum a backstop interest auction needs, at the pool oracle's prices. The bid is one token, `treasury.get_token()`, sized at 1.2 times the lot's value divided by the price `treasury.get_oracle()` reports for it, rescaled from that oracle's decimals to the pool oracle's. One runs at a time. Bid and lot scale along v2's auction curve. Request type 10 fills it: the pool calls `treasury.donate(filler, scaled bid)` under the filler's authorization, subtracts each delivered lot amount from its reserve's `protocol_credit`, and transfers the lot to the filler.
+
+**Interest auction fills.** Backstop and protocol interest auctions fill only in full. A fill below 100% fails with `BadRequest`.
+
+**Borrow limit.** On a reserve with a `borrow_limit` above zero, `net` is the reserve's borrows, a flash loan included, minus its repayments over one `submit` or `flash_loan`, floored at zero. At the end of the batch the pool sets `used` to `max(0, used − ceil(borrow_limit × elapsed / BORROW_WINDOW)) + net`, where `elapsed` is the time since `last`. It fails with `BorrowLimitExceeded` if `net` is above zero and `used` exceeds `borrow_limit`, and otherwise stores `used` with the current time. A repayment frees capacity only against borrows in the same batch. An auction fill is not a borrow. A missing entry means nothing is in use. A change to `borrow_limit` keeps `used` and `last`. `BORROW_WINDOW` is a constant, five hours.
 
 **Hook call.** After every request in a batch has been applied, the health check has passed and the tokens have moved, the pool calls `hook.on_submit(from, spender, to, requests, reserves, positions)` once, with the batch as submitted, every reserve it touched in its final state and the final positions of `from`. Every batch is hooked, whatever its request types; no other function calls the hook. A panic reverts the whole transaction. Without a hook no call is made (spec/hooks.md).
 
@@ -57,14 +62,15 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 
 **Status and hook.** The call is allowed in every pool status and on a disabled reserve, as a withdraw is. It is not a `submit`: the hook is not called and cannot block or trigger it.
 
-**What it cannot do.** It cannot recall borrowed-out tokens, erase any debt, change another holder's position, touch `backstop_credit`, `protocol_credit` or the backstop's deposits, or act on a token that has no SAC administrator; the v2.1 Comet LP token is one. It cannot freeze a balance. An issuer action against the pool's own balance: see `reconcile` and Open points.
+**What it cannot do.** It cannot recall borrowed-out tokens, erase any debt, change another holder's position, touch `backstop_credit`, `protocol_credit` or the backstop's deposits, or act on a token that has no SAC administrator, such as the v1.1 Comet LP token. It cannot freeze a balance. An issuer action against the pool's own balance: see `reconcile` and Open points.
 
 ## Types
 
 | Type | Fields | Content |
 |---|---|---|
 | `PoolConfig` | v2's fields plus `min_backstop: i128` | v2's pool config; `min_backstop` is the activation threshold, in backstop tokens |
-| `ReserveConfig` | v2's fields plus `max_price_age: u64`, `gulp_to_suppliers: bool` and `freeze_threshold: u32` | v2's reserve config; `max_price_age` is how old a price for the reserve may be, in seconds; `gulp_to_suppliers` sends `gulp`'s surplus to suppliers instead of `backstop_credit`; `freeze_threshold` is the shortfall, as a share of the reserve's total supply in 7 decimals, from which `reconcile` freezes the pool; 0 never freezes |
+| `ReserveConfig` | v2's fields plus `max_price_age: u64`, `gulp_to_suppliers: bool`, `freeze_threshold: u32` and `borrow_limit: i128` | v2's reserve config. `max_price_age` is how old a price for the reserve may be, in seconds. `gulp_to_suppliers` sends `gulp`'s surplus to suppliers instead of `backstop_credit`. `freeze_threshold` is the shortfall, as a share of the reserve's total supply in 7 decimals, from which `reconcile` freezes the pool, and 0 never freezes. `borrow_limit` is the most of the asset that can be borrowed at once, in the asset's units. Capacity refills at `borrow_limit` per `BORROW_WINDOW`. 0 has no limit. |
+| `BorrowUse` | `used: i128, last: u64` | the part of a reserve's borrow limit in use and the time it was last updated |
 | `ReserveData` | v2's fields plus `protocol_credit: i128` | v2's reserve data; `protocol_credit`, next to `backstop_credit`, is the protocol's share of accrued interest, in the reserve's token |
 | `RequestType` | v2's variants plus `FillProtocolInterestAuction = 10` | the request types `submit` accepts |
 | `AuctionType` | v2's variants plus `ProtocolInterestAuction = 3` | the auction types |
@@ -77,6 +83,7 @@ These v2 functions are unchanged: `propose_admin`, `accept_admin`, `cancel_set_r
 | `Treasury` | instance, `Address` | the treasury |
 | `Distributor` | instance, `Address` | the distributor |
 | `Hook` | instance, `Option<Address>` | the hook, if any |
+| `BorrowUse(asset)` | temporary, `BorrowUse` | the reserve's borrow limit in use. Its TTL is at least `BORROW_WINDOW` in ledgers at the shortest ledger time. |
 | v2's persistent keys, emissions included | persistent, as v2 | `ReserveData` carries `protocol_credit` |
 
 No protocol rate is stored.
@@ -96,17 +103,18 @@ No protocol rate is stored.
 | Error | Code | When |
 |---|---|---|
 | `InvalidPoolConfigArgs` | 1201 | as v2, plus a negative `min_backstop` or a backstop take rate above the cap |
-| `InvalidReserveMetadata` | 1202 | as v2, plus a `max_price_age` of zero |
-| `InvalidPrice` | 1210 | as v2, with the reserve's `max_price_age` in place of 24 hours |
+| `InvalidReserveMetadata` | 1202 | as v2, plus a `max_price_age` of zero or a negative `borrow_limit` |
+| `InvalidPrice` | 1210 | as v2, with the reserve's `max_price_age` in place of 24 hours, plus a payout token price from the treasury's oracle that is missing, not positive or older than 24 hours |
 | the backstop interest auction's codes | as v2 | the same conditions in a protocol interest auction |
-| `BadRequest` | 1200 | as v2, plus a `clawback` whose `amount` is not positive or whose `from` is the pool |
+| `BadRequest` | 1200 | as v2, plus a `clawback` whose `amount` is not positive or whose `from` is the pool, and an interest auction fill below 100% |
 | `BalanceError` | 10 | as v2, plus a `clawback` whose `from` holds fewer b_tokens than `amount` converts to, or after which the pool's balance did not fall by exactly `amount` |
 | `InvalidHf` | 1205 | as v2, plus a `clawback` that would leave `from` below the minimum health factor |
 | `MinCollateralNotMet` | 1224 | as v2, plus a `clawback` that would leave `from` with debt and collateral below `min_collateral` |
 | `InvalidUtilRate` | 1207 | as v2, plus a `clawback` that leaves the reserve's utilization at or above 100% |
 | `AuctionInProgress` | 1212 | as v2, plus a `clawback` while `from` has an open user liquidation auction |
+| `BorrowLimitExceeded` | 1225 | a borrow that takes a reserve's `used` above its `borrow_limit` |
 
-`PoolError` keeps v2's codes. A failing `treasury.get_price` propagates unchanged. In `clawback` the SAC rejects a missing administrator signature, a short pool balance or a non-clawbackable balance. A token without `admin()` is a host error. A rejecting hook's own code propagates unchanged.
+`PoolError` keeps v2's codes. A failing `treasury.donate` propagates unchanged. In `clawback` the SAC rejects a missing administrator signature, a short pool balance or a non-clawbackable balance. A token without `admin()` is a host error. A rejecting hook's own code propagates unchanged.
 
 ## Invariants
 
@@ -126,16 +134,18 @@ Cited files are in `blend-contracts-v2`.
 
 - Bindings: `__constructor` (`pool/src/contract.rs`) took `backstop_id` and `blnd_id` from the factory; v3 adds `min_backstop`, `treasury`, `distributor` and `hook` (`pool/src/storage.rs`).
 - Accrual: `Reserve::accrue` (`pool/src/pool/reserve.rs`) took one share, at `bstop_rate`; v3 takes a second, at the treasury's rate, into `protocol_credit`.
-- Rate caps: `require_valid_pool_config` (`pool/src/pool/config.rs`) accepted any `bstop_rate` below one; v3 caps it at `MAX_BACKSTOP_RATE` and the protocol rate at `MAX_PROTOCOL_RATE`, constants in `pool/src/constants.rs` set before deployment.
+- Rate caps: `require_valid_pool_config` (`pool/src/pool/config.rs`) accepted any `bstop_rate` below one. v3 caps it at `MAX_BACKSTOP_RATE`, 50%, and the protocol rate at `MAX_PROTOCOL_RATE`, 5%, constants in `pool/src/constants.rs`.
 - Price age: `load_price` (`pool/src/pool/pool.rs`) rejected a price older than 24 hours; v3 uses the reserve's `max_price_age`.
 - Gulp: `execute_gulp` (`pool/src/pool/gulp.rs`) credited every surplus to `backstop_credit`; v3 raises `b_rate` instead on a reserve with `gulp_to_suppliers` set.
 - Auctions: `AuctionType` (`pool/src/auctions/auction.rs`) had three types and `RequestType` (`pool/src/pool/actions.rs`) ten; v3 adds one of each, built on `pool/src/auctions/backstop_interest_auction.rs`.
+- Fills: `fill` (`pool/src/auctions/auction.rs`) accepts any percent from 1 to 100 for every auction type. v3 accepts only 100 for interest auctions.
 - Backstop calls: `backstop_interest_auction.rs` and `bad_debt_auction.rs` checked the bid or lot token against `backstop.backstop_token()` and sized with `backstop.pool_data().token_spot_price` at 7 decimals; v3 uses `query_asset()` and `asset_price()`, rescaled. The interest auction's fill called `backstop.donate` under the filler's allowance; v3 transfers the bid to the backstop. `status.rs` read `pool_data().q4w_pct`; v3 divides the backstop's share balance by `total_supply()`.
 - Threshold: `calc_pool_backstop_threshold` (`pool/src/pool/status.rs`) computed a product constant from the BLND and USDC behind the backstop's LP tokens; v3 compares `backstop.total_assets()` with `min_backstop`, and the default rule in `pool/src/pool/bad_debt.rs` follows.
 - Emissions: `pool/src/emissions/manager.rs` called `backstop.gulp_emissions(pool)` for the allocation and `distributor.rs` drew the BLND from the backstop's allowance; v3 calls `distributor.gulp_pool_emissions(pool)` and draws from the distributor's. Backstop depositors claim from the distributor (spec/distributor.md).
 - Hook: new, at the end of `execute_submit` and `execute_submit_with_flash_loan` (`pool/src/pool/submit.rs`). `pool/src/dependencies/` gains treasury, distributor and hook clients.
 - Clawback: v2 has no issuer entry point. A clawback executed directly against the pool's balance leaves custody short of the pool's records with no accounting response: `gulp` in `pool/src/pool/gulp.rs` credits a surplus to `backstop_credit` and returns zero on a deficit. A deauthorization of the pool's balance stops the pool's transfers of that asset, with no accounting response. v3 writes the first off with `reconcile` and leaves the second; the targeted clawback is added beside them. Against a v2 withdraw (`apply_withdraw` in `pool/src/pool/actions.rs`), the clawback keeps the conversion (`to_b_token_up` in `pool/src/pool/reserve.rs`), the emission settlement (`remove_supply` and `remove_collateral` in `pool/src/pool/user.rs`), the utilization rule (`require_utilization_below_100` in `pool/src/pool/reserve.rs`) and the health check (`validate_submit` in `pool/src/pool/submit.rs`). It differs in five ways: the SAC administrator authorizes it instead of the holder; it does not clamp to the position; the SAC burns the tokens instead of the pool transferring them; one call spans ordinary supply and collateral, in that order; and it is not a `submit`, so no hook runs. An open user liquidation auction on `from` blocks it as it blocks a `submit` (`validate_submit` in `pool/src/pool/submit.rs`). Repayments follow `apply_repay` in `pool/src/pool/actions.rs`, with the administrator as spender.
 - Shortfall: `reconcile` is new; a shortfall of at least the reserve's `freeze_threshold` sets status 4, admin frozen, which `update_status` (`pool/src/pool/status.rs`) cannot lift.
+- Borrow limit: new. v2 limits a reserve's borrowing only by `max_util` (`require_utilization_below_max` in `pool/src/pool/reserve.rs`), not by how fast debt grows.
 
 ## Open points
 

@@ -28,7 +28,7 @@ Four principles shape the design.
 1. **Isolated first-loss capital.** One backstop per pool, holding one token, bound to that pool for life.
 2. **Shared dependencies are opt-in.** A standard backstop holds the LP token of the protocol's BLND–USDC liquidity pool and can earn BLND emissions. A pool that wants neither deploys a custom backstop in a token of its choice and earns no emissions.
 3. **Immutable core, composable edges.** No core contract can be upgraded. A pool adds its own rules through a hook, fixed when the pool is deployed.
-4. **The protocol pays for itself.** A share of borrower interest, capped in code, funds maintenance and audits.
+4. **The protocol pays for itself.** A share of borrower interest, capped in code, funds the protocol's development and maintenance.
 
 ## 2. System overview
 
@@ -39,9 +39,9 @@ Four principles shape the design.
 | Pool | An isolated lending market. It holds the reserves, the positions and the auctions. |
 | Backstop | One per pool. It holds the pool's first-loss capital in one token and issues shares to depositors. |
 | Pool factory | Deploys each pool, binds its backstop and records how it was deployed. |
-| Treasury | Sets the protocol's share of interest, within a cap, and receives protocol interest auction bids. |
+| Treasury | Sets the protocol's share of interest, within a cap, receives protocol interest auction bids and auctions its buyback share for BLND to burn. |
 | Emitter | Mints 1 BLND per second to the distributor. |
-| Distributor | Splits the BLND among the pools in the reward zone (§7.1) and pays it to their backstop depositors and users. |
+| Distributor | Splits the BLND among the pools in the reward zone (§7.1) and pays it to their backstop depositors and users. Its owner can burn part of it instead. |
 | Hook | Optional, one per pool. The pool calls it after every batch of user actions, and it can reject the batch. |
 | Oracle | One per pool, chosen at deploy. It prices the pool's assets. |
 
@@ -99,8 +99,9 @@ A pool lends a set of assets, its reserves. The pool admin sets each reserve's p
 | `max_price_age` | The oldest oracle price the reserve accepts, in seconds. |
 | `gulp_to_suppliers` | Whether a surplus of the asset (§9.3) goes to suppliers instead of backstop credit (§3.5). |
 | `freeze_threshold` | The shortfall, as a share of the reserve's supply, that freezes the pool (§9.2). Zero never freezes. |
+| `borrow_limit` | The most of the asset that can be borrowed at once. It refills over five hours. Only repayments in the same batch free capacity. Zero has no limit. |
 
-Supply and utilization caps limit what a pool can lose to an asset whose token or price fails.
+Supply and utilization caps limit what a pool can lose to an asset whose token or price fails. The borrow limit caps how fast it can lose it.
 
 Anyone can apply a change 7 days after the admin queues it, or at once while the pool is in setup (§3.7).
 
@@ -163,7 +164,7 @@ Each accrual splits a reserve's interest three ways, in the borrowed asset:
 2. **Protocol credit**, at the protocol rate, read from the treasury at each accrual (§6).
 3. **Suppliers**, the remainder, which raises `b_rate`.
 
-Both rates are capped by constants in pool code, and the two caps together stay below 100%, so suppliers always keep a share. The split does not change what borrowers pay. The two credits stay in the pool, per reserve, until an interest auction sells them (§5.4).
+The backstop take rate can never exceed 50% and the protocol rate 5%, constants in pool code, so suppliers always keep a share. The split does not change what borrowers pay. The two credits stay in the pool, per reserve, until an interest auction sells them (§5.4).
 
 ### 3.6 Oracle
 
@@ -231,7 +232,7 @@ Every auction trades a lot, which the filler receives, for a bid, which the fill
 - For the first 200 ledgers the bid stays at 100% and the lot grows by 0.5% per ledger, from 0% to 100%.
 - For the next 200 ledgers the lot stays at 100% and the bid shrinks by 0.5% per ledger, to 0%.
 
-The terms improve for fillers every ledger until someone fills, so the market sets the price, not a fixed penalty. A filler may take any percentage of an auction, and the rest stays open on the same curve. Partial fills let fillers with little capital take part.
+The terms improve for fillers every ledger until someone fills, so the market sets the price, not a fixed penalty. A filler may take any percentage of a liquidation or bad-debt auction, and the rest stays open on the same curve. Partial fills let fillers with little capital take part. Interest auctions fill only in full.
 
 ### 5.2 Liquidations
 
@@ -268,11 +269,13 @@ Anyone can start either auction once its lot is worth a minimum fixed in pool co
 
 ## 6. Protocol fee and treasury
 
-The treasury is one contract for the whole protocol. Its owner sets the protocol rate, the share of borrower interest that becomes protocol credit (§3.5). The rate can never exceed a cap compiled into the pool. Every pool reads the rate at each accrual and applies it to all interest since the last one. The fee applies to every pool, whatever its backstop and its take rate.
+The treasury is one contract for the whole protocol. Its owner sets the protocol rate, the share of borrower interest that becomes protocol credit (§3.5). The rate can never exceed 5%, a cap compiled into the pool. Every pool reads the rate at each accrual and applies it to all interest since the last one. The fee applies to every pool, whatever its backstop and its take rate.
 
-The owner also names the payout token that protocol interest auctions take as their bid, with the oracle that prices it. Bids arrive at the treasury by plain transfer, and the treasury cannot block or alter a fill.
+The owner also names the payout token that protocol interest auctions take as their bid, with the oracle that prices it. At fill the pool donates the bid to the treasury.
 
-The owner can withdraw collected fees and transfer ownership. Ownership can be renounced only at a zero rate, which fixes the fee at zero for good. The fees fund maintenance and audits. The surplus is meant to buy back and burn BLND, so every pool supports BLND whether or not its backstop holds any.
+The owner sets the buyback split, from 0 to 100%. Every donation puts that share into a buyback pot. Anyone can auction the pot for BLND once it is worth 200 in the treasury oracle's base, and the BLND is burned. The lot grows over the first 200 ledgers. The bid falls to zero 400 ledgers after the start, and only full fills are allowed. Changing the payout token first auctions what is left in the pot.
+
+The owner can withdraw the rest of the fees and transfer ownership, but cannot withdraw the buyback pot. Ownership can be renounced only at a zero rate and a 100% split, which fixes the fee at zero for good. The fees fund the protocol's development and maintenance.
 
 ## 7. BLND emissions
 
@@ -289,7 +292,7 @@ When the zone is full, a pool enters by replacing one whose backstop holds less.
 
 ### 7.2 Distribution
 
-Anyone can call `distribute`. The distributor collects the BLND minted since the last call and splits it across the zone, in proportion to each backstop's holdings outside the withdrawal queue. Once a day, anyone can split a pool's allotment:
+Anyone can call `distribute`. The distributor collects the BLND minted since the last call and splits it across the zone, in proportion to each backstop's holdings outside the withdrawal queue. The distributor's owner sets the share of it that is split, from 0 to 100%, and the rest is burned. Once a day, anyone can split a pool's allotment:
 
 - **70% to backstop depositors.** It is paid out evenly over the next 7 days to every share outside the withdrawal queue. Depositors claim it from the distributor, in BLND.
 - **30% to the pool's users.** The distributor grants it to the pool as an allowance. The pool admin decides how it is shared among each reserve's suppliers and borrowers. It is paid out over 7 days, and users claim it from the pool.
@@ -333,7 +336,8 @@ A pool can also come to hold more of an asset than it owes, for example after a 
 | Role | Can | Cannot |
 |---|---|---|
 | Pool admin | Queue reserve changes, set the status within the limits of §3.7, change the backstop take rate under its cap, `max_positions` and `min_collateral`, split the pool's emissions among its reserves, hand over the role | Change the oracle, the backstop, the hook, the treasury, the distributor or `min_backstop`, or move anyone's funds |
-| Treasury owner | Set the protocol rate under its cap, set the payout token and its price source, withdraw collected fees, transfer or renounce ownership | Exceed the cap, touch pool or backstop funds, redirect a fill |
+| Treasury owner | Set the protocol rate under its cap, the buyback split, the payout token and its oracle, withdraw collected fees outside the buyback pot, transfer or renounce ownership | Exceed the cap, touch pool or backstop funds, redirect a fill, withdraw the buyback pot |
+| Distributor owner | Set the share of emissions that reaches the zone, transfer or renounce ownership | Transfer BLND, change the zone or replace the distributor |
 | Asset issuer | Claw back one holder's position through the pool, repaying their debt in the same call | Recall lent-out tokens or erase debt |
 | Hook | Reject any batch, and act under the authorization the user signed | Change what the pool did with a batch |
 | Anyone | Deploy a pool, act in any pool, start and fill auctions, update a pool's status, move bad debt to the backstop, call `gulp` and `reconcile`, distribute emissions and update the reward zone within its rules | |

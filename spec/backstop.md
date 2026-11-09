@@ -29,7 +29,7 @@ A backstop holds one pool's first-loss capital in one token: depositors receive 
 
 A `from` other than the operator provides the deposit through the operator's allowance on the backstop token; an `owner` other than the operator has a redemption requested or cancelled, or shares redeemed or withdrawn, through the operator's allowance on the share token, as the standard spends it.
 
-The standard backstop derives `asset_price` from the Blend v2.1 BLND–USDC Comet pool as v2's `token_spot_price` did: USDC per LP share, scaled by the inverse of USDC's weight in the pool, without fees or slippage, reported at 7 decimals. A custom backstop reports it from an oracle or a pricing method of its own.
+The standard backstop derives `asset_price` from the v1.1 Comet BLND–USDC pool as v2's `token_spot_price` did: USDC per LP share, scaled by the inverse of USDC's weight in the pool, without fees or slippage, reported at 7 decimals. A custom backstop reports it from an oracle or a pricing method of its own.
 
 The backstop's one emission duty is the report: `distributor.report(pool, user, shares)`, once per reported account, with its own pool and the account's share balance after the change. Nothing outside the backstop can change a share balance, so no other function reports. The backstop reports whether or not its pool is in the zone. The backstop keeps no index, no schedule and no accrual, and never holds BLND. A custom backstop implements `query_asset`, `total_assets`, `total_supply`, `balance` of itself, `draw`, `asset_price` and `pool`, with the pool's address in its constructor; the rest is the pool admin's choice. It reports nothing.
 

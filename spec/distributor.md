@@ -2,23 +2,26 @@
 
 ## Purpose
 
-The distributor is the emitter's recipient: it receives the BLND the emitter mints and splits it across the reward zone under v2's rules, applied to separate backstops instead of one. Only a standard deployment of the factory can enter the zone; a custom backstop earns nothing, even one holding the same LP token. Backstops report their depositors' shares to it under their pool's address. The distributor keeps, per pool, the reported balances, each depositor's accrual and the pool's own; depositors claim from it, pools pull their share from it as an allowance. It is the only holder of BLND between the emitter and the claimants.
+The distributor is the emitter's recipient: it receives the BLND the emitter mints and splits it across the reward zone under v2's rules, applied to separate backstops instead of one. Only a standard deployment of the factory can enter the zone. A custom backstop earns nothing, even one holding the same LP token. Backstops report their depositors' shares to it under their pool's address. The distributor keeps, per pool, the reported balances, each depositor's accrual and the pool's own. Depositors claim from it, and pools pull their share from it as an allowance. It is the only holder of BLND between the emitter and the claimants. Its owner sets the share of emissions that reaches the zone, and the rest is burned.
 
 ## Interface
 
 | Function | Arguments | Returns | Who must authorize | Effect |
 |---|---|---|---|---|
-| `__constructor` | `emitter: Address, blnd_token: Address, usdc_token: Address, lp_token: Address, factory: Address, drop_list: Vec<(Address, i128)>` | none | the deployer | Stores the dependencies and the drop list; `lp_token` is the Blend v2.1 BLND–USDC Comet pool, whose LP token is the standard backstop asset. No setters. |
+| `__constructor` | `owner: Address, emitter: Address, blnd_token: Address, usdc_token: Address, lp_token: Address, factory: Address, drop_list: Vec<(Address, i128)>, emission_share: u32` | none | the deployer | Stores the owner, the dependencies, the drop list and the emission share. `lp_token` is the v1.1 Comet BLND–USDC pool, whose LP token is the standard backstop asset. Fails with `InvalidShare` above 100%. |
 | `report` | `pool: Address, user: Address, shares: i128` | none | the address `factory.get_backstop(pool)` returns | Calls `factory.get_backstop(pool)`, which panics unless `pool` is a standard deployment, and requires the returned address's authorization. Updates the pool's index and `user`'s accrual at the stored shares, as v2's `update_emissions`, then stores `shares` as `user`'s and moves the pool's share total by the difference. Fails for a negative amount. |
 | `claim` | `from: Address, pools: Vec<Address>, to: Address` | `i128`, BLND paid | `from` | Updates each listed pool's index and `from`'s accrual as a report does, takes what `from` has accrued in each and transfers the sum to `to` in one BLND transfer. Fails on an empty list, a pool listed twice, a pool without emission data and a zero sum. |
 | `gulp_pool_emissions` | `pool: Address` | `i128`, BLND approved | `pool` | Splits the BLND allotted to `pool` since its last gulp as v2's `gulp_emissions`: raises `pool`'s allowance on the BLND token by 30% of it, with v2's allowance expiration (`LEDGER_BUMP_USER`), adds 70% to its depositors' schedule (below) and zeroes the allotment. Once a day per pool. |
-| `distribute` | none | `i128`, BLND split | nobody | Calls the emitter's `distribute`, then splits the BLND due since the last distribution across the zone as v2's `distribute` (below). The first call after the swap only stores the emitter's time for the distributor. Does nothing before the swap. |
+| `distribute` | none | `i128`, BLND split | nobody | Calls the emitter's `distribute`, then splits the emission share of the BLND due since the last distribution across the zone as v2's `distribute` and burns the rest (below). The first call after the swap only stores the emitter's time for the distributor. Does nothing before the swap. |
 | `drop` | none | none | nobody | Calls the emitter's `drop` with the drop list, as v2's backstop did. The emitter takes the distributor's authorization, mints the listed amounts, at most 50M BLND in all, and drops once. |
 | `add_reward` | `to_add: Address, to_remove: Option<Address>` | none | nobody | Calls `factory.get_backstop(to_add)`, which panics unless `to_add` is a standard deployment, then adds `to_add` as v2's `add_reward`: its backstop's `total_assets` must meet the admission threshold (below), `distribute` must have run within the hour unless the zone is empty, and in a full zone `to_add` replaces `to_remove` only if its backstop's `total_assets` is higher. |
 | `remove_reward` | `to_remove: Address` | none | nobody | Removes `to_remove` as v2's `remove_reward`: only once its backstop's `total_assets` no longer meets the admission threshold, and only if `distribute` has run within the hour. |
 | `reward_zone` | none | `Vec<Address>` | nobody | The pools in the zone. |
+| `get_emission_share` | none | `u32` | nobody | The emission share. |
+| `set_emission_share` | `share: u32` | none | owner | Sets the emission share. It applies to the BLND the next `distribute` splits. Fails with `InvalidShare` above 100%. |
+| Ownership | `Ownable`: `get_owner`, `transfer_ownership`, `accept_ownership`, `renounce_ownership` | as OpenZeppelin | as OpenZeppelin | OpenZeppelin's implementation. |
 
-Amounts of BLND and of LP tokens have 7 decimals; shares are amounts of the backstop's share token. Kept functions keep v2's names.
+Amounts of BLND and of LP tokens have 7 decimals. Shares are amounts of the backstop's share token. The emission share is a `u32` with 7 decimals. Kept functions keep v2's names.
 
 ### Eligibility
 
@@ -32,7 +35,7 @@ A report updates first and stores second: the pool's index and `user`'s accrual 
 
 ### Distribution
 
-`distribute` splits the BLND due since the last distribution, 1 BLND per second, across the pools in the zone as v2's `distribute`: it reads each pool's `unqueued_assets` from the backstop `factory.get_backstop(pool)` returns, and each pool's part is its amount over the zone's total, floor-rounded. The part is added to the pool's allotment, v2's `RzEmissions`.
+`distribute` splits the BLND due since the last distribution, 1 BLND per second, across the pools in the zone as v2's `distribute`: it reads each pool's `unqueued_assets` from the backstop `factory.get_backstop(pool)` returns, and each pool's part is its amount over the zone's total, floor-rounded. The part is added to the pool's allotment, v2's `RzEmissions`. Only the emission share of the BLND due is split. The rest is burned in the same call.
 
 ### Depositors
 
@@ -79,6 +82,8 @@ The transfer redirects emissions only; it redeems no old LP shares and moves no 
 | `BEmisData(pool)` | persistent, `BackstopEmissionData` | the depositors' schedule and index |
 | `UserShares(pool, user)` | persistent, `i128` | the depositor's reported shares |
 | `UEmisData(pool, user)` | persistent, `UserEmissionData` | the depositor's accrual |
+| `EmissionShare` | instance, `u32` | the emission share, 7 decimals, at most 100% |
+| owner, pending owner | OpenZeppelin `Ownable` entries | |
 
 Nothing is keyed by a backstop address. The distributor holds every BLND the emitter has minted to it that no depositor, supplier or borrower has claimed, and the old Comet LP shares from the handover. Allowances live on the BLND token; the distributor stores none.
 
@@ -86,12 +91,14 @@ Nothing is keyed by a backstop address. The distributor holds every BLND the emi
 
 | Event | Topics | Data |
 |---|---|---|
-| `distribute` | `["distribute"]` | `amount`, split across the zone |
+| `distribute` | `["distribute"]` | `amount`, split across the zone, and the amount burned |
 | `rw_zone_add` | `["rw_zone_add"]` | `[to_add, to_remove]` |
 | `rw_zone_remove` | `["rw_zone_remove"]` | `to_remove` |
 | `claim` | `["claim", from]` | `[to, amount]` |
 | `report` | `["report", pool]` | `[user, shares]` |
 | `gulp_pool_emissions` | `["gulp_pool_emissions", pool]` | `[backstop_emissions, pool_emissions]` |
+| `set_emission_share` | `["set_emission_share"]` | the new share |
+| `ownership_transfer`, `ownership_transfer_completed`, `ownership_renounced` | as OpenZeppelin | as OpenZeppelin |
 
 `distribute`, `rw_zone_add`, `rw_zone_remove` and `claim` keep v2's topics.
 
@@ -104,8 +111,10 @@ Nothing is keyed by a backstop address. The distributor holds every BLND the emi
 | `InvalidRewardZoneEntry` | 1002 | a pool below the threshold at `add_reward`, a replacement whose backstop's `total_assets` is not higher, or a `to_remove` outside the zone |
 | `RewardZoneFull` | 1009 | a full zone with no `to_remove` |
 | `NothingToClaim` | new, in v2's range | a claim whose sum is zero |
+| `InvalidShare` | new, in v2's range | a share above 100% in the constructor or `set_emission_share` |
+| OpenZeppelin `OwnableError`, `RoleTransferError` | as OpenZeppelin | the ownership functions |
 
-All but `NothingToClaim` are v2's backstop codes for the same conditions. A report or `add_reward` for a pool that is not a standard deployment fails with the factory's `NotStandardDeployment` (spec/factory.md); a report without the backstop's authorization is a host error.
+All but `NothingToClaim`, `InvalidShare` and the ownership errors are v2's backstop codes for the same conditions. A report or `add_reward` for a pool that is not a standard deployment fails with the factory's `NotStandardDeployment` (spec/factory.md). A report without the backstop's authorization is a host error.
 
 ## Invariants
 
@@ -118,7 +127,8 @@ All but `NothingToClaim` are v2's backstop codes for the same conditions. A repo
 - Only a standard deployment of the factory reports or enters the zone; the factory's record decides, on every report and at `add_reward`, never a caller-supplied address. The distributor stores no pool–backstop binding and nothing under a backstop address.
 - `min_backstop` never affects eligibility.
 - `distribute` reads each backstop in the zone; no call iterates the depositors, and a claim touches the pools the caller lists and no other. A report calls only the factory, and the distributor never calls a pool.
-- BLND leaves the distributor only by `claim`, to the `to` it names, and by `transfer_from` against an allowance a gulp raised. The distributor never transfers an LP token of either Comet pool.
+- BLND leaves the distributor only by `claim`, to the `to` it names, by `transfer_from` against an allowance a gulp raised and by the burn in `distribute`.
+- The owner sets only the emission share. It cannot transfer BLND, change the zone or replace the distributor. The distributor never transfers an LP token of either Comet pool.
 
 ## Differences from v2
 
@@ -132,9 +142,10 @@ Compared with blend-contracts-v2 at the audited mainnet commit.
 - Pull. v2's `gulp_emissions(pool)` is `gulp_pool_emissions(pool)`, with the same split, schedule, event data and once-a-day rule.
 - Claims. v2's `claim(from, pool_addresses, min_lp_tokens_out)` (`backstop/src/emissions/claim.rs`) swapped the BLND into LP tokens through the Comet pool and redeposited them for `from`; v3's `claim(from, pools, to)` keeps the pool list and pays BLND to `to`, touching no backstop.
 - Pool side. v2's pool module (`pool/src/emissions/`) called `backstop.gulp_emissions` and drew its allowance from the backstop; it now calls `distributor.gulp_pool_emissions` and draws from the distributor.
+- Emission share. New. v2's `distribute` split all the BLND due and had no owner.
 - Backfill. v2's `distribute` could backfill emissions for the period before its swap completed (`MAX_BACKFILLED_EMISSIONS`); the distributor has no backfill.
 
 ## Open points
 
-1. Guarding the emitter after the handover (README open question 1). The backstop swap compares balances of one token at one address, and after the swap the v2.1 Comet LP tokens sit in the backstops, not in the distributor. What the distributor names as its token decides who can take the emitter later and how a successor is installed, including how the distributor itself is replaced.
+1. Guarding the emitter after the handover (README open question 1). The backstop swap compares balances of one token at one address, and after the swap the v1.1 Comet LP tokens sit in the backstops, not in the distributor. What the distributor names as its token decides who can take the emitter later and how a successor is installed, including how the distributor itself is replaced.
 2. The emitter drop (README open question 2). Who is on the drop list and for how much.
