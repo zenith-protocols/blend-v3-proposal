@@ -103,7 +103,7 @@ flowchart LR
 1. Interest accrues to the USDC reserve whenever anyone touches it, as in v2.
 2. The interest is split per reserve, in its token: backstop credit at the backstop take rate as in v2, `protocol_credit` at the protocol rate, and the rest to suppliers (§3.4).
 3. The backstop's share is turned into backstop tokens by an interest auction. A filler bids backstop tokens (the BLND–USDC LP token for a standard backstop, the pool's own choice for a custom one) for the accrued USDC. At fill the pool transfers the bid to the backstop. Every depositor's share is now worth more.
-4. The protocol's share is sold the same way, in a protocol interest auction: a filler bids the treasury's payout token for the accrued USDC credit. At fill the bid goes to the treasury and the credit to the filler.
+4. The protocol's share is sold the same way, in a protocol interest auction: a filler bids USDC for the accrued credit. At fill the bid goes to the treasury and the credit to the filler.
 
 If the borrower instead defaults, the pool liquidates the position. What the collateral does not cover becomes bad debt, which is moved to the backstop and covered by selling backstop tokens in a bad-debt auction (§3.1).
 
@@ -113,7 +113,7 @@ If the borrower instead defaults, the pool liquidates the position. What the col
 | standard `backstop` | One per pool, bound at deploy. Holds the LP token of the v1.1 Comet BLND–USDC pool on OpenZeppelin vault math with v2's withdrawal queue. Reports to the distributor. |
 | `pool-factory` | Deploys a pool and its backstop as a bound pair from fixed code, or binds a supplied custom backstop. Bakes the treasury and distributor addresses into the pool, so no deployer can choose their own. Records which route was used. |
 | `distributor` | Receives the emitter's BLND and applies the reward-zone rules across separate backstops. |
-| `treasury` | Holds the protocol rate, under the cap, names the payout token, and holds the collected fees. Auctions its buyback share for BLND and burns it. Owner-managed, ownership transferable. |
+| `treasury` | Holds the protocol rate, under the cap, and the collected fees. Auctions its buyback share for BLND and burns it. Owner-managed, ownership transferable. |
 | hooks | Optional contract per pool, called after every batch. |
 
 ## 3. What changes
@@ -176,9 +176,9 @@ flowchart TB
 
 **Design.** Every reserve records a `protocol_credit`, the protocol's share of borrower interest, in the asset that was borrowed, next to the backstop's credit. Suppliers receive what is left after the two shares. The fee is a percentage of interest. The treasury owner sets the protocol rate in the treasury contract, within an immutable 5% cap enforced by pool code. Each pool reads the rate from the treasury when it accrues interest. Pools with a zero backstop take rate still pay the protocol fee. The backstop take rate is capped at 50% and the protocol rate at 5%, constants in pool code, so the two shares together can never take the whole of the interest.
 
-The credit is collected by a protocol interest auction, the twin of the backstop interest auction. The lot is the accrued protocol credit of the listed reserves. The bid is the treasury's payout token, sized at 1.2 times the lot's oracle value and falling along v2's auction curve. Anyone may start one once the lot is worth the same minimum a backstop interest auction needs, one runs at a time, and at fill the filler's bid goes to the treasury and the lot to the filler. Backstop and protocol interest auctions fill only in full. The treasury reports its payout token's price for sizing the bid.
+The credit is collected by a protocol interest auction, the twin of the backstop interest auction. The lot is the accrued protocol credit of the listed reserves. The bid is USDC, sized at 1.2 times the lot's oracle value and falling along v2's auction curve. Anyone may start one once the lot is worth the same minimum a backstop interest auction needs, one runs at a time, and at fill the filler's bid goes to the treasury and the lot to the filler. Backstop and protocol interest auctions fill only in full.
 
-The treasury is owned. Its owner sets the rate and the payout token, and can disable the fee by setting the rate to zero and the split to 100% and renouncing ownership. Credit below the auction minimum then stays in each pool. A split set by the owner, from 0 to 100%, puts part of every fee into a buyback pot that the owner cannot withdraw. Anyone can auction the pot for BLND, and the BLND is burned. Specification: [spec/treasury.md](spec/treasury.md) and [spec/pool.md](spec/pool.md).
+The treasury is owned. Its owner sets the rate and can disable the fee by setting the rate to zero and the split to 100% and renouncing ownership. Credit below the auction minimum then stays in each pool. A split set by the owner, from 0 to 100%, puts part of every fee into a buyback pot that the owner cannot withdraw. Anyone can auction the pot for BLND, and the BLND is burned. Specification: [spec/treasury.md](spec/treasury.md) and [spec/pool.md](spec/pool.md).
 
 | If you are a… | What changes |
 |---|---|
@@ -186,7 +186,7 @@ The treasury is owned. Its owner sets the rate and the payout token, and can dis
 | Borrower | Nothing changes in what you pay. |
 | Pool admin | The fee applies to every pool. The backstop take rate you set is the backstop's share only. |
 | BLND holder | The buyback split of every pool's fee buys BLND back and burns it. |
-| Integrator | Fill protocol interest auctions as you fill backstop ones, with the payout token as the bid. Read `protocol_credit` per reserve. |
+| Integrator | Fill protocol interest auctions as you fill backstop ones, with USDC as the bid. Read `protocol_credit` per reserve. |
 
 ### 3.5 Pool hooks
 
@@ -276,7 +276,7 @@ Nothing migrates by itself, and nothing is forced.
 
 **Emissions.** The YieldBlox Security Council transfers the old Comet LP shares it holds to the distributor, so the emitter's backstop swap accepts the distributor as its new recipient after the 31-day queue.
 
-**Integrators.** The pool ABI for supply, borrow, repay, withdraw, auctions and flash loans is v2's. The backstop, treasury, hook and distributor modules are described per role in §3 and in the specifications. Backstop depositors' BLND claims move to the distributor. Interest-auction fillers bid the pool's backstop token instead of one shared token, and a second interest auction, for the protocol's share, takes the treasury's payout token. The treasury's buyback auction takes BLND.
+**Integrators.** The pool ABI for supply, borrow, repay, withdraw, auctions and flash loans is v2's. The backstop, treasury, hook and distributor modules are described per role in §3 and in the specifications. Backstop depositors' BLND claims move to the distributor. Interest-auction fillers bid the pool's backstop token instead of one shared token, and a second interest auction, for the protocol's share, takes USDC. The treasury's buyback auction takes BLND.
 
 ## 6. Security
 
@@ -288,7 +288,7 @@ Blend v2 at the commit v3 forks from was audited by Code4rena and by Certora, wh
 
 **Distributor.** A new contract holds the emitter's recipient role for every eligible backstop. Eligibility is read from factory records, so a pool admin cannot make a pool eligible by configuration. What guards the emitter against a hostile swap after the handover, and how the distributor is replaced, is open question 1.
 
-**Protocol fee.** The treasury owner's levers are the rate, under a cap in pool code, the buyback split and the payout token with its price. A wrong token or price only reduces what the treasury collects or what a buyback burns, down to zero. The owner cannot withdraw the buyback pot. The lot of a protocol interest auction is protocol credit, never supplier funds. The auction is v2's interest-auction mechanism with a second type.
+**Protocol fee.** The treasury owner's levers are the rate, under a cap in pool code, and the buyback split. The owner cannot withdraw the buyback pot. The lot of a protocol interest auction is protocol credit, never supplier funds. The auction is v2's interest-auction mechanism with a second type.
 
 **Hooks.** A hook is trusted code. The core guarantees only that a hook cannot change what the pool did with a batch. A hook can refuse any action, including an exit, and can do under the user's signature whatever its code says. It is fixed at deploy, its code is public, and the UI shows a pool's hook and warns when it is not a known one.
 
@@ -339,7 +339,7 @@ Standard backstops still share one dependency, the v1.1 Comet LP token. A pool t
 - **Pool status.** Active, on ice (no new borrowing) or frozen (no new positions), set by the admin, by the backstop's queue or by `reconcile`.
 - **Protocol fee / protocol rate.** The share of borrower interest that goes to the treasury, set by the treasury owner under an immutable cap.
 - **`protocol_credit`.** The protocol's accrued share of interest, recorded per reserve in the borrowed asset until a protocol interest auction sells it.
-- **Protocol interest auction.** The auction that sells a pool's accrued protocol credit for the treasury's payout token. It is the twin of the backstop interest auction.
+- **Protocol interest auction.** The auction that sells a pool's accrued protocol credit for USDC. It is the twin of the backstop interest auction.
 - **Reward zone.** The set of pools, up to a fixed number, that share emissions in proportion to their backstops.
 - **Standard backstop.** A backstop the factory deploys from its fixed code, holding the LP token of the v1.1 Comet BLND–USDC pool and eligible for emissions.
 - **Stellar Asset Contract (SAC).** The contract form of a classic Stellar asset. Its administrator can authorize, deauthorize and, if the asset allows it, claw back balances.

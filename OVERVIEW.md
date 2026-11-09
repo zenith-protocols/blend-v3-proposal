@@ -70,7 +70,7 @@ Suppose a borrower owes interest on a USDC loan in some pool.
 1. Interest accrues to the USDC reserve whenever anyone touches it.
 2. The pool splits the interest in USDC: the backstop's share at the pool's backstop take rate, the protocol's share at the treasury's rate, and the rest to the reserve's suppliers (§3.5).
 3. A backstop interest auction sells the backstop's share. The filler pays in the backstop's token, which goes to the backstop and raises the value of every share (§5.4).
-4. A protocol interest auction sells the protocol's share. The filler pays in the treasury's payout token, which goes to the treasury.
+4. A protocol interest auction sells the protocol's share. The filler pays in USDC, which goes to the treasury.
 
 ### 2.3 Deploying a pool
 
@@ -261,7 +261,7 @@ Two auctions sell the credits interest leaves in the pool (§3.5).
 | | Backstop interest auction | Protocol interest auction |
 |---|---|---|
 | Lot | backstop credit of the listed reserves | protocol credit of the listed reserves |
-| Bid | the backstop's token | the treasury's payout token |
+| Bid | the backstop's token | USDC |
 | Bid at the start | 1.2 times the lot's value | 1.2 times the lot's value |
 | Bid goes to | the backstop | the treasury |
 
@@ -271,9 +271,9 @@ Anyone can start either auction once its lot is worth a minimum fixed in pool co
 
 The treasury is one contract for the whole protocol. Its owner sets the protocol rate, the share of borrower interest that becomes protocol credit (§3.5). The rate can never exceed 5%, a cap compiled into the pool. Every pool reads the rate at each accrual and applies it to all interest since the last one. The fee applies to every pool, whatever its backstop and its take rate.
 
-The owner also names the payout token that protocol interest auctions take as their bid, with the oracle that prices it. At fill the pool donates the bid to the treasury.
+At fill the pool donates the bid to the treasury.
 
-The owner sets the buyback split, from 0 to 100%. Every donation puts that share into a buyback pot. Anyone can auction the pot for BLND once it is worth 200 in the treasury oracle's base, and the BLND is burned. The lot grows over the first 200 ledgers. The bid falls to zero 400 ledgers after the start, and only full fills are allowed. Changing the payout token first auctions what is left in the pot.
+The owner sets the buyback split, from 0 to 100%. Every donation puts that share into a buyback pot. Anyone can auction the pot for BLND once it holds 200 USDC, and the BLND is burned. The lot grows over the first 200 ledgers. The bid falls to zero 400 ledgers after the start, and only full fills are allowed.
 
 The owner can withdraw the rest of the fees and transfer ownership, but cannot withdraw the buyback pot. Ownership can be renounced only at a zero rate and a 100% split, which fixes the fee at zero for good. The fees fund the protocol's development and maintenance.
 
@@ -336,7 +336,7 @@ A pool can also come to hold more of an asset than it owes, for example after a 
 | Role | Can | Cannot |
 |---|---|---|
 | Pool admin | Queue reserve changes, set the status within the limits of §3.7, change the backstop take rate under its cap, `max_positions` and `min_collateral`, split the pool's emissions among its reserves, hand over the role | Change the oracle, the backstop, the hook, the treasury, the distributor or `min_backstop`, or move anyone's funds |
-| Treasury owner | Set the protocol rate under its cap, the buyback split, the payout token and its oracle, withdraw collected fees outside the buyback pot, transfer or renounce ownership | Exceed the cap, touch pool or backstop funds, redirect a fill, withdraw the buyback pot |
+| Treasury owner | Set the protocol rate under its cap, the buyback split, withdraw collected fees outside the buyback pot, transfer or renounce ownership | Exceed the cap, touch pool or backstop funds, redirect a fill, withdraw the buyback pot |
 | Distributor owner | Set the share of emissions that reaches the zone, transfer or renounce ownership | Transfer BLND, change the zone or replace the distributor |
 | Asset issuer | Claw back one holder's position through the pool, repaying their debt in the same call | Recall lent-out tokens or erase debt |
 | Hook | Reject any batch, and act under the authorization the user signed | Change what the pool did with a batch |
