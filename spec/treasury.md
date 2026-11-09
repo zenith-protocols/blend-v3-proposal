@@ -92,7 +92,7 @@ Every entry point extends the instance TTL. `get_rate` and `get_token` read inst
 - The lot of a protocol interest auction is `protocol_credit` only. The treasury never receives supplier or backstop funds.
 - The pool calls the treasury only through `get_rate`, `get_token` and `donate`, and the treasury calls no pool. A failing `donate` stops protocol interest auctions and nothing else. The credit keeps accruing in the pool.
 - `Buyback` and an open auction's lot leave the treasury only through `fill_auction`. The owner cannot withdraw them.
-- `new_auction` fails only while an auction is open. From 400 ledgers after the start anyone can fill it at a zero bid.
+- `new_auction` fails while an auction is open or when `Buyback` is below the minimum. From 400 ledgers after the start anyone can fill it at a zero bid.
 - After `renounce_ownership` the rate is zero and stays zero, the split is 100% and never changes, and nothing leaves the treasury except buyback lots. Bids filled after that, for credit accrued before the rate reached zero, still arrive at the treasury.
 
 ## Differences from v2
